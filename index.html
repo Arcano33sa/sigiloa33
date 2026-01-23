@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0b0e" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Sigilo A33</title>
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="icon" href="./assets/icon-192.png" />
+  <link rel="apple-touch-icon" href="./assets/icon-192.png" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div id="app" class="app">
+    <header class="topbar" role="banner">
+      <div class="brand">
+        <img class="brand-logo" src="./assets/logo.png" alt="Sigilo A33" />
+        <div class="brand-text">
+          <div class="brand-title">Sigilo A33</div>
+          <div class="brand-subtitle">Cifrado privado, interfaz limpia</div>
+        </div>
+      </div>
+    </header>
+
+    <main id="main" class="main" role="main">
+      <!-- ENCRIPTAR -->
+      <section class="screen" data-screen="encrypt" aria-labelledby="h-encrypt">
+        <h1 id="h-encrypt" class="h1">Encriptar</h1>
+
+        <label class="label" for="encryptInput">Mensaje</label>
+        <textarea id="encryptInput" class="textarea" rows="5" placeholder="Escribe tu mensaje…"></textarea>
+
+        <label class="label" for="encryptContact">Contacto</label>
+        <select id="encryptContact" class="select">
+          <option value="" selected>Sin contactos aún</option>
+        </select>
+
+        <button id="btnEncrypt" class="btn primary" type="button">Encriptar</button>
+
+        <div class="card">
+          <div class="card-title">Resultado</div>
+          <div id="encryptResult" class="mono empty">Aquí aparecerá el mensaje cifrado…</div>
+        </div>
+      </section>
+
+      <!-- DESENCRIPTAR -->
+      <section class="screen" data-screen="decrypt" aria-labelledby="h-decrypt">
+        <h1 id="h-decrypt" class="h1">Desencriptar</h1>
+
+        <label class="label" for="decryptInput">Pegar mensaje cifrado</label>
+        <textarea id="decryptInput" class="textarea" rows="5" placeholder="Pega el mensaje cifrado…"></textarea>
+
+        <button id="btnDecrypt" class="btn primary" type="button">Desencriptar</button>
+
+        <div class="card">
+          <div class="card-title">Resultado</div>
+          <div id="decryptResult" class="mono empty">Aquí aparecerá el texto desencriptado…</div>
+        </div>
+      </section>
+
+      <!-- CONTACTOS -->
+      <section class="screen" data-screen="contacts" aria-labelledby="h-contacts">
+        <div class="row">
+          <h1 id="h-contacts" class="h1">Contactos</h1>
+          <button id="btnAddContact" class="btn" type="button">Agregar</button>
+        </div>
+
+        <label class="label" for="contactSearch">Buscar</label>
+        <input id="contactSearch" class="input" type="search" placeholder="Nombre, apellidos o alias…" autocomplete="off" />
+
+        <div class="list card">
+          <div class="card-title">Lista</div>
+          <div id="contactsEmpty" class="empty-state">
+            <div class="empty-emoji">🗝️</div>
+            <div class="empty-title">Sin contactos todavía</div>
+            <div class="empty-subtitle">Agrega uno para cifrar con su clave.</div>
+          </div>
+
+          <!-- Plantilla (oculta) para el futuro -->
+          <template id="contactItemTpl">
+            <div class="item">
+              <div class="item-main">
+                <div class="item-title">Nombre Apellidos</div>
+                <div class="item-subtitle">@alias</div>
+              </div>
+              <button class="btn danger" type="button" aria-label="Eliminar contacto">Eliminar</button>
+            </div>
+          </template>
+
+          <div id="contactsList" class="items" hidden></div>
+        </div>
+      </section>
+
+      <!-- PERFIL -->
+      <section class="screen" data-screen="profile" aria-labelledby="h-profile">
+        <h1 id="h-profile" class="h1">Perfil</h1>
+
+        <div class="grid">
+          <div>
+            <label class="label" for="profileName">Nombre</label>
+            <input id="profileName" class="input" type="text" placeholder="Tu nombre" />
+          </div>
+          <div>
+            <label class="label" for="profileLast">Apellidos</label>
+            <input id="profileLast" class="input" type="text" placeholder="Tus apellidos" />
+          </div>
+          <div class="full">
+            <label class="label" for="profileAlias">Alias</label>
+            <input id="profileAlias" class="input" type="text" placeholder="@tu_alias" />
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">QR</div>
+          <div class="empty">Próximamente: compartir contacto por QR.</div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Backup</div>
+          <div class="empty">Próximamente: respaldo cifrado y restauración.</div>
+        </div>
+      </section>
+    </main>
+
+    <nav class="tabbar" role="navigation" aria-label="Navegación inferior">
+      <button class="tab" data-tab="encrypt" type="button">
+        <span class="tab-ico">🔒</span>
+        <span class="tab-txt">Encriptar</span>
+      </button>
+      <button class="tab" data-tab="decrypt" type="button">
+        <span class="tab-ico">🔓</span>
+        <span class="tab-txt">Desencriptar</span>
+      </button>
+      <button class="tab" data-tab="contacts" type="button">
+        <span class="tab-ico">👤</span>
+        <span class="tab-txt">Contactos</span>
+      </button>
+      <button class="tab" data-tab="profile" type="button">
+        <span class="tab-ico">⚙️</span>
+        <span class="tab-txt">Perfil</span>
+      </button>
+    </nav>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>
