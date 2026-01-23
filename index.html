@@ -15,12 +15,16 @@
 <body>
   <div id="app" class="app">
     <header class="topbar" role="banner">
-      <div class="brand">
-        <img class="brand-logo" src="./assets/logo.png" alt="Sigilo A33" />
-        <div class="brand-text">
-          <div class="brand-title">Sigilo A33</div>
-          <div class="brand-subtitle">Cifrado privado, interfaz limpia</div>
-        </div>
+      <div class="brand" aria-label="Sigilo A33">
+        <img
+          class="brand-logo"
+          src="./assets/sigilo-a33-logo.png"
+          alt=""
+          width="34"
+          height="34"
+          onerror="this.hidden=true; this.closest('.brand').classList.add('no-logo');"
+        />
+        <div class="brand-title">Sigilo A33</div>
       </div>
     </header>
 
@@ -41,7 +45,11 @@
 
         <div class="card">
           <div class="card-title">Resultado</div>
-          <div id="encryptResult" class="mono empty">Aquí aparecerá el mensaje cifrado…</div>
+          <textarea id="encryptResult" class="textarea mono" rows="4" readonly placeholder="Aquí aparecerá el mensaje cifrado…"></textarea>
+          <div class="btnrow">
+            <button id="btnCopyEncrypted" class="btn" type="button">Copiar</button>
+            <button id="btnShareEncrypted" class="btn" type="button">Compartir</button>
+          </div>
         </div>
       </section>
 
@@ -82,8 +90,8 @@
           <template id="contactItemTpl">
             <div class="item">
               <div class="item-main">
-                <div class="item-title">Nombre Apellidos</div>
-                <div class="item-subtitle">@alias</div>
+                <div class="item-title">Nombre Apellidos (@alias)</div>
+                <div class="item-subtitle">No verificado</div>
               </div>
               <button class="btn danger" type="button" aria-label="Eliminar contacto">Eliminar</button>
             </div>
@@ -96,6 +104,11 @@
       <!-- PERFIL -->
       <section class="screen" data-screen="profile" aria-labelledby="h-profile">
         <h1 id="h-profile" class="h1">Perfil</h1>
+
+        <div id="identityError" class="card card-error" hidden>
+          <div class="card-title">Identidad</div>
+          <div id="identityErrorText" class="mono">No se pudo inicializar identidad.</div>
+        </div>
 
         <div class="grid">
           <div>
@@ -113,13 +126,76 @@
         </div>
 
         <div class="card">
-          <div class="card-title">QR</div>
-          <div class="empty">Próximamente: compartir contacto por QR.</div>
+          <div class="card-title">Identidad</div>
+
+          <div class="kv">
+            <div class="k">Huella</div>
+            <div id="profileFingerprint" class="mono">—</div>
+          </div>
+
+          <div class="kv">
+            <div class="k">Candado público</div>
+            <div id="profileLockPreview" class="mono lock-preview empty">—</div>
+          </div>
+
+          <div class="btnrow">
+            <button id="btnCopyLock" class="btn" type="button">Copiar candado</button>
+            <button id="btnCopyFingerprint" class="btn" type="button">Copiar huella</button>
+          </div>
+
+          <div class="hint">La llave privada nunca se muestra. Ni aunque la invites a cenar.</div>
+        </div>
+
+        <div class="card">
+          <div class="row between">
+            <div>
+              <div class="card-title">Mi QR</div>
+              <div class="muted">Comparte tu candado en formato QR (sin cámara por ahora).</div>
+            </div>
+            <button id="btnShowMyQR" class="btn" type="button">Mostrar QR</button>
+          </div>
         </div>
 
         <div class="card">
           <div class="card-title">Backup</div>
-          <div class="empty">Próximamente: respaldo cifrado y restauración.</div>
+          <div class="hint hint-compact">Respaldo cifrado de <b>identidad</b> y <b>contactos</b>. Sin contraseña, no hay magia.</div>
+
+          <div class="kv" style="padding-top:10px;">
+            <div class="k">Exportar</div>
+            <div style="flex:1;">
+              <label class="label" for="backupExportPass" style="margin-top:0;">Contraseña</label>
+              <input id="backupExportPass" class="input" type="password" placeholder="Crea una contraseña" autocomplete="new-password" />
+              <label class="label" for="backupExportPass2">Confirmar</label>
+              <input id="backupExportPass2" class="input" type="password" placeholder="Repite la contraseña" autocomplete="new-password" />
+              <div class="btnrow" style="margin-top:10px;">
+                <button id="btnExportBackup" class="btn" type="button">Exportar backup</button>
+                <button id="btnCopyBackup" class="btn" type="button" disabled>Copiar</button>
+              </div>
+              <textarea id="backupExportOut" class="textarea mono" rows="3" readonly placeholder="Aquí saldrá el texto cifrado del backup…" style="margin-top:10px; min-height:96px;"></textarea>
+              <div id="backupExportErr" class="hint hint-compact danger" hidden></div>
+            </div>
+          </div>
+
+          <div class="kv" style="padding-top:10px;">
+            <div class="k">Importar</div>
+            <div style="flex:1;">
+              <input id="backupFile" type="file" accept=".txt,.backup,.a33,.sigilo" hidden />
+              <div class="btnrow" style="margin-top:0;">
+                <button id="btnPickBackupFile" class="btn" type="button">Subir archivo</button>
+                <button id="btnPasteBackup" class="btn" type="button">Pegar</button>
+              </div>
+
+              <label class="label" for="backupImportText">Contenido</label>
+              <textarea id="backupImportText" class="textarea mono" rows="3" placeholder="SIGILOA33:BACKUP:1:..."></textarea>
+
+              <label class="label" for="backupImportPass">Contraseña</label>
+              <input id="backupImportPass" class="input" type="password" placeholder="Contraseña del backup" autocomplete="current-password" />
+
+              <button id="btnImportBackup" class="btn primary" type="button">Importar backup</button>
+              <div id="backupImportErr" class="hint hint-compact danger" hidden></div>
+              <div class="hint hint-compact">Si el backup trae otra identidad, se pedirá confirmación fuerte para reemplazar.</div>
+            </div>
+          </div>
         </div>
       </section>
     </main>
@@ -142,8 +218,162 @@
         <span class="tab-txt">Perfil</span>
       </button>
     </nav>
+
+    <div id="toast" class="toast" aria-live="polite" aria-atomic="true"></div>
+
+    <!-- Modal: Agregar/Editar contacto (Etapa 4) -->
+    <div id="contactModal" class="modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="contactModalTitle">
+      <div class="modal-backdrop" data-close="1"></div>
+      <div class="modal-card">
+        <div class="modal-head">
+          <div id="contactModalTitle" class="modal-title">Agregar contacto</div>
+          <button id="btnCloseContactModal" class="iconbtn" type="button" aria-label="Cerrar">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="grid">
+            <div>
+              <label class="label" for="contactName">Nombre</label>
+              <input id="contactName" class="input" type="text" placeholder="Nombre" autocomplete="off" />
+            </div>
+            <div>
+              <label class="label" for="contactLast">Apellidos</label>
+              <input id="contactLast" class="input" type="text" placeholder="Apellidos" autocomplete="off" />
+            </div>
+            <div class="full">
+              <label class="label" for="contactAlias">Alias (opcional)</label>
+              <input id="contactAlias" class="input" type="text" placeholder="@ana" autocomplete="off" />
+            </div>
+            <div class="full">
+              <label class="label" for="contactQrText">Pegar texto QR</label>
+              <textarea id="contactQrText" class="textarea" rows="3" placeholder="SIGILOA33:1:..."></textarea>
+              <div class="btnline">
+                <button id="btnScanContactQR" class="btn" type="button">Escanear QR</button>
+              </div>
+              <div id="contactQrError" class="hint hint-compact danger" hidden></div>
+              <div class="detectbox" aria-label="Detectado">
+                <div class="detectrow"><span class="k">Alias detectado</span><span id="contactDetectedAlias" class="mono">—</span></div>
+                <div class="detectrow"><span class="k">Huella detectada</span><span id="contactDetectedHuella" class="mono">—</span></div>
+              </div>
+
+              <label class="checkrow" for="contactVerified">
+                <input id="contactVerified" type="checkbox" />
+                <span>Marcar como verificado</span>
+              </label>
+              <div class="hint hint-compact">Confirma la huella con la otra persona.</div>
+              <div class="hint hint-compact">Si pegas un QR válido, se rellena el formulario automáticamente.</div>
+            </div>
+            <div class="full">
+              <label class="label" for="contactLock">Pegar candado público</label>
+              <textarea id="contactLock" class="textarea" rows="6" placeholder="Pega aquí el candado público…"></textarea>
+              <div class="hint hint-compact">Se calcula la huella automáticamente.</div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button id="btnCancelContact" class="btn" type="button">Cancelar</button>
+          <button id="btnSaveContact" class="btn primary" type="button">Guardar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: Escanear QR (Etapa 6) -->
+    <div id="scanQrModal" class="modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="scanQrModalTitle">
+      <div class="modal-backdrop" data-close="1"></div>
+      <div class="modal-card">
+        <div class="modal-head">
+          <div id="scanQrModalTitle" class="modal-title">Escanear QR</div>
+          <button id="btnCloseScanQrModal" class="iconbtn" type="button" aria-label="Cerrar">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="scanwrap">
+            <video id="scanQrVideo" class="scanvideo" autoplay playsinline muted></video>
+          </div>
+          <div id="scanQrError" class="hint hint-compact danger" hidden></div>
+          <div class="hint hint-compact">Apunta la cámara al QR de la otra persona.</div>
+        </div>
+        <div class="modal-actions">
+          <button id="btnScanQrPaste" class="btn" type="button">Pegar texto QR</button>
+          <button id="btnScanQrCancel" class="btn" type="button">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: Confirmar eliminar (Etapa 4) -->
+    <div id="confirmModal" class="modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="confirmModalTitle">
+      <div class="modal-backdrop" data-close="1"></div>
+      <div class="modal-card">
+        <div class="modal-head">
+          <div id="confirmModalTitle" class="modal-title">Eliminar</div>
+          <button id="btnCloseConfirmModal" class="iconbtn" type="button" aria-label="Cerrar">✕</button>
+        </div>
+        <div class="modal-body">
+          <div id="confirmText" class="confirm-text">¿Eliminar este contacto?</div>
+          <div class="hint hint-compact">Esto borra todo lo asociado a este contacto en esta app.</div>
+        </div>
+        <div class="modal-actions">
+          <button id="btnConfirmCancel" class="btn" type="button">Cancelar</button>
+          <button id="btnConfirmDelete" class="btn danger" type="button">Eliminar</button>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- Modal: Mi QR (Etapa 5) -->
+    <div id="myQrModal" class="modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="myQrModalTitle">
+      <div class="modal-backdrop" data-close="1"></div>
+      <div class="modal-card">
+        <div class="modal-head">
+          <div id="myQrModalTitle" class="modal-title">Mi QR</div>
+          <button id="btnCloseMyQrModal" class="iconbtn" type="button" aria-label="Cerrar">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="qr-wrap">
+            <div class="qr-box">
+              <canvas id="myQrCanvas" width="1" height="1" aria-label="Mi QR"></canvas>
+            </div>
+          </div>
+
+          <div class="full" style="margin-top:12px;">
+            <label class="label" for="myQrText">Texto QR</label>
+            <textarea id="myQrText" class="textarea mono" rows="3" readonly></textarea>
+            <div class="hint hint-compact">Pégalo en <b>Contactos</b> → <b>Agregar</b> → <b>Pegar texto QR</b>.</div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button id="btnCopyMyQrText" class="btn" type="button">Copiar texto QR</button>
+          <button id="btnCopyMyCandado" class="btn" type="button">Copiar candado</button>
+        </div>
+      </div>
+    </div>
+
+
   </div>
 
+
+
+    <!-- Modal: Reemplazar identidad (Etapa 8) -->
+    <div id="replaceIdentityModal" class="modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="replaceIdentityTitle">
+      <div class="modal-backdrop" data-close="1"></div>
+      <div class="modal-card">
+        <div class="modal-head">
+          <div id="replaceIdentityTitle" class="modal-title">Reemplazar identidad</div>
+          <button id="btnCloseReplaceIdentityModal" class="iconbtn" type="button" aria-label="Cerrar">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="confirm-text">Esto reemplaza tu llave privada actual.</div>
+          <div id="replaceIdentityInfo" class="hint hint-compact">—</div>
+
+          <label class="label" for="replaceIdentityWord">Escribe <b>REEMPLAZAR</b> para confirmar</label>
+          <input id="replaceIdentityWord" class="input" type="text" placeholder="REEMPLAZAR" autocomplete="off" autocapitalize="characters" />
+          <div id="replaceIdentityErr" class="hint hint-compact danger" hidden></div>
+        </div>
+        <div class="modal-actions">
+          <button id="btnReplaceIdentityCancel" class="btn" type="button">Cancelar</button>
+          <button id="btnReplaceIdentityConfirm" class="btn danger" type="button">Reemplazar</button>
+        </div>
+      </div>
+    </div>
+  <script src="./qrcode-generator.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>

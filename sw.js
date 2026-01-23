@@ -1,11 +1,13 @@
-/* Sigilo A33 — SW (Etapa 1) */
-const CACHE = "sigilo-a33-v0.1.0";
+/* Sigilo A33 — SW (Etapa 5) */
+const CACHE = "sigilo-a33-v0.1.4";
 const ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
   "./manifest.json",
+  "./qrcode-generator.js",
+  "./assets/sigilo-a33-logo.png",
   "./assets/logo.png",
   "./assets/icon-192.png",
   "./assets/icon-512.png",
