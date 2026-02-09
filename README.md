@@ -1,4 +1,4 @@
-# Sigilo A33 — v0.2.0 (Etapa 8D/2)
+# Sigilo A33 — v0.2.2 (Etapa 9B/2)
 
 App web mobile‑first para cifrar y descifrar mensajes entre contactos usando “candados” (clave pública), con identidad local y libreta de contactos.
 
@@ -6,6 +6,7 @@ App web mobile‑first para cifrar y descifrar mensajes entre contactos usando �
 - **Encriptar / Desencriptar** (1‑a‑1)
 - **Contactos** (agregar, escanear QR, eliminar)
 - **Perfil** (identidad, candado, huella)
+- **Compartir app**: QR solo URL + ayuda “Agregar a pantalla de inicio” (PWA)
 - **Backup / Restore con contraseña** (identidad + perfil + contactos)
 
 ## Backup (formato)

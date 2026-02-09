@@ -1,7 +1,7 @@
-/* Sigilo A33 — SW (Etapa 8D) */
+/* Sigilo A33 — SW (Etapa 9B) */
 // HARDENING: nunca devolver index.html a requests de assets (.js/.css/.png/etc)
 // para evitar que el navegador reciba HTML como si fuera JS (típico "QR en blanco" en iPad/PWA).
-const CACHE = "sigilo-a33-v0.2.0-8d";
+const CACHE = "sigilo-a33-v0.2.2-9b";
 const ASSETS = [
   "./",
   "./index.html",

@@ -198,6 +198,9 @@ body{
   color: rgba(245,243,239,.70);
 }
 
+.hint-compact.ok{ color: var(--gold2); }
+.pwa-help{ white-space: pre-line; }
+
 /* Contactos: QR scan + verificación (Etapa 6) */
 .btnline{
   display:flex;
@@ -394,6 +397,11 @@ body{
   line-height: 1.35;
   word-break: break-word;
 }
+.input-mini{
+  height: 38px;
+  padding: 10px 10px;
+  font-size: 12px;
+}
 .empty{ color: rgba(245,243,239,.70); }
 .empty.mono, .mono.empty{ color: rgba(227,201,138,.75); }
 
@@ -501,6 +509,16 @@ body{
 
 #myQrModal .modal-body,
 #myQrModal .modal-card{
+  overflow-x: hidden;
+}
+
+#appShareModal .modal-body,
+#appShareModal .modal-card{
+  overflow-x: hidden;
+}
+
+#appShareModal .modal-body,
+#appShareModal .modal-card{
   overflow-x: hidden;
 }
 

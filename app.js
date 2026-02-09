@@ -61,6 +61,50 @@
     return m ? m[1] : "encrypt";
   }
 
+  // URL canónico de la app (solo origin + pathname; sin hashes ni parámetros)
+  function canonicalAppUrl(){
+    try{
+      const origin = String(window.location.origin || "");
+      let path = String(window.location.pathname || "/");
+      // Normalizar index.html si existe
+      path = path.replace(/\/index\.html?$/i, "/");
+      // Evitar dobles slashes (sin tocar el protocolo)
+      path = path.replace(/\/{2,}/g, "/");
+      if (!path.startsWith("/")) path = "/" + path;
+      return origin + path;
+    }catch(e){
+      return (window.location.origin || "") + (window.location.pathname || "/");
+    }
+  }
+
+  // ---------- PWA helpers (Etapa 9B) ----------
+  function isStandaloneMode(){
+    try{
+      // iOS: navigator.standalone (legacy), modern: display-mode
+      if (window.navigator && window.navigator.standalone === true) return true;
+      const mm = window.matchMedia && window.matchMedia("(display-mode: standalone)");
+      if (mm && mm.matches) return true;
+      const mmFs = window.matchMedia && window.matchMedia("(display-mode: fullscreen)");
+      if (mmFs && mmFs.matches) return true;
+      return false;
+    }catch(_e){
+      return false;
+    }
+  }
+
+  function detectPwaHelpLines(){
+    const ua = String(navigator.userAgent || "");
+    const isIOS = /iPad|iPhone|iPod/i.test(ua);
+    const isAndroid = /Android/i.test(ua);
+
+    const iosLine = "iPhone (Safari): Compartir → Agregar a pantalla de inicio";
+    const andLine = "Android (Chrome): Menú → Instalar app / Agregar a pantalla principal";
+
+    if (isIOS && !isAndroid) return [iosLine];
+    if (isAndroid) return [andLine];
+    return [iosLine, andLine];
+  }
+
   // ---------- Storage (IndexedDB con fallback localStorage) ----------
   function openDB(){
     return new Promise((resolve, reject) => {
@@ -940,7 +984,7 @@
     return { ok:true, ec:qrPack.ec, err:null };
   }
 
-  function renderQrToSvgInline(text, mountEl){
+  function renderQrToSvgInline(text, mountEl, altText){
     if (!mountEl) return { ok:false, ec:null, err:new Error("NO_MOUNT") };
     if (!isQrLibOk()) return { ok:false, ec:null, err:new Error("QR_LIB_MISSING") };
 
@@ -954,7 +998,7 @@
       const { qr, ec } = pickBestQrDiag(t);
       const cellSize = 4;
       const margin = cellSize * 4; // quiet zone = 4 modules
-      mountEl.innerHTML = qr.createSvgTag({ cellSize, margin, scalable: true, alt: "Mi QR" });
+      mountEl.innerHTML = qr.createSvgTag({ cellSize, margin, scalable: true, alt: (altText || "Mi QR") });
       return { ok:true, ec, err:null };
     }catch(e){
       mountEl.innerHTML = "";
@@ -1197,6 +1241,21 @@
   const btnCopyLock = $("#btnCopyLock");
   const btnCopyFp = $("#btnCopyFingerprint");
   const btnShowMyQR = $("#btnShowMyQR");
+
+  // Compartir app (Etapa 9A)
+  const btnShowAppQr = $("#btnShowAppQr");
+  const btnCopyAppLink = $("#btnCopyAppLink");
+  const btnShareAppLink = $("#btnShareAppLink");
+  const appShareModal = $("#appShareModal");
+  const btnCloseAppShareModal = $("#btnCloseAppShareModal");
+  const btnCloseAppShareModal2 = $("#btnCloseAppShareModal2");
+  const appShareQrSvg = $("#appShareQrSvg");
+  const appShareQrCanvas = $("#appShareQrCanvas");
+  const appShareUrl = $("#appShareUrl");
+  const appShareErr = $("#appShareErr");
+  const appSharePwaInstalled = $("#appSharePwaInstalled");
+  const appSharePwaHelp = $("#appSharePwaHelp");
+
   const myQrModal = $("#myQrModal");
   const btnCloseMyQrModal = $("#btnCloseMyQrModal");
   const myQrSvg = $("#myQrSvg");
@@ -1330,11 +1389,54 @@
       toast("Candado copiado");
     });
 
+    // Compartir app (Etapa 9A) — SOLO URL
+    btnShowAppQr?.addEventListener("click", () => openAppShare());
+
+    btnCopyAppLink?.addEventListener("click", async () => {
+      try{
+        const u = canonicalAppUrl();
+        await copyToClipboard(u);
+        toast("Enlace copiado");
+      }catch(_e){
+        toast("No se pudo copiar enlace");
+      }
+    });
+
+    btnShareAppLink?.addEventListener("click", async () => {
+      const u = canonicalAppUrl();
+      if (!u){ toast("Enlace no disponible"); return; }
+
+      if (navigator.share){
+        try{
+          await navigator.share({ title: "Sigilo A33", text: "Descargar Sigilo A33", url: u });
+        }catch(e){
+          // AbortError = usuario canceló. Sin drama.
+          if (String(e?.name || "") === "AbortError") return;
+          // Fallback a copiar si share falla por permisos/contexto.
+          try{ await copyToClipboard(u); toast("Enlace copiado"); }catch(_e){ toast("No se pudo compartir"); }
+        }
+      }else{
+        try{ await copyToClipboard(u); toast("Enlace copiado"); }catch(_e){ toast("No se pudo copiar enlace"); }
+      }
+    });
+
+    btnCloseAppShareModal?.addEventListener("click", closeAppShare);
+    btnCloseAppShareModal2?.addEventListener("click", closeAppShare);
+    appShareModal?.addEventListener("click", (ev) => {
+      const t = ev.target;
+      if (t && t.dataset && t.dataset.close) closeAppShare();
+    });
+    appShareUrl?.addEventListener("focus", () => { try{ appShareUrl.select(); }catch(_e){} });
+
     // Rotación / resize: mantener el QR visible
     window.addEventListener("resize", () => {
       if (myQrModal && !myQrModal.hidden){
         clearTimeout(_myQrResizeTimer);
         _myQrResizeTimer = setTimeout(scheduleMyQrRender, 120);
+      }
+      if (appShareModal && !appShareModal.hidden){
+        clearTimeout(_appShareResizeTimer);
+        _appShareResizeTimer = setTimeout(scheduleAppShareRender, 120);
       }
     });
   }
@@ -1364,6 +1466,111 @@
     if (_myQrRaf) cancelAnimationFrame(_myQrRaf);
     _myQrRaf = 0;
     closeModal(myQrModal);
+  }
+
+  // ---------- Compartir app (Etapa 9A) ----------
+  function refreshAppSharePwaUI(){
+    const standalone = isStandaloneMode();
+
+    if (appSharePwaInstalled) appSharePwaInstalled.hidden = !standalone;
+
+    if (appSharePwaHelp){
+      if (standalone){
+        appSharePwaHelp.hidden = true;
+        appSharePwaHelp.textContent = "";
+      }else{
+        const lines = detectPwaHelpLines();
+        appSharePwaHelp.textContent = (lines || []).join("\n");
+        appSharePwaHelp.hidden = !appSharePwaHelp.textContent.trim();
+      }
+    }
+  }
+
+  function openAppShare(){
+    const u = canonicalAppUrl();
+    if (!u){
+      toast("Enlace no disponible");
+      return;
+    }
+    if (appShareUrl) appShareUrl.value = u;
+
+    // Ayuda PWA / standalone (Etapa 9B)
+    refreshAppSharePwaUI();
+
+    setHintError(appShareErr, "");
+    if (appShareQrSvg){ appShareQrSvg.hidden = false; appShareQrSvg.innerHTML = ""; }
+    if (appShareQrCanvas) appShareQrCanvas.hidden = true;
+
+    openModal(appShareModal);
+    scheduleAppShareRender();
+  }
+
+  function closeAppShare(){
+    if (_appShareRaf) cancelAnimationFrame(_appShareRaf);
+    _appShareRaf = 0;
+    closeModal(appShareModal);
+  }
+
+  let _appShareRaf = 0;
+  let _appShareResizeTimer = null;
+
+  function setAppSharePlaceholder(){
+    if (!appShareQrSvg) return;
+    appShareQrSvg.hidden = false;
+    appShareQrSvg.innerHTML = `
+      <div class="qr-placeholder">
+        <div class="qr-ph-title">QR no disponible</div>
+      </div>`;
+    if (appShareQrCanvas) appShareQrCanvas.hidden = true;
+  }
+
+  function scheduleAppShareRender(){
+    if (!appShareModal || appShareModal.hidden) return;
+    const t = String(appShareUrl?.value || canonicalAppUrl() || "").trim();
+    if (!t) return;
+
+    setHintError(appShareErr, "");
+    if (appShareQrSvg){ appShareQrSvg.hidden = false; appShareQrSvg.innerHTML = ""; }
+    if (appShareQrCanvas) appShareQrCanvas.hidden = true;
+
+    if (_appShareRaf) cancelAnimationFrame(_appShareRaf);
+    _appShareRaf = requestAnimationFrame(() => {
+      _appShareRaf = 0;
+      // 2 frames: asegurar modal visible (iPad Safari)
+      requestAnimationFrame(() => {
+        const libOk = isQrLibOk();
+        if (!libOk){
+          setHintError(appShareErr, "No se pudo renderizar el QR: librería no cargó");
+          setAppSharePlaceholder();
+          return;
+        }
+
+        let ok = false;
+        let lastErr = null;
+
+        // SVG primero
+        if (appShareQrSvg){
+          const resSvg = renderQrToSvgInline(t, appShareQrSvg, "Descargar Sigilo A33");
+          ok = !!resSvg?.ok;
+          if (!ok) lastErr = resSvg?.err || null;
+        }
+
+        // Fallback canvas
+        if (!ok && appShareQrCanvas){
+          appShareQrCanvas.hidden = false;
+          const resC = renderQrToCanvas(t, appShareQrCanvas);
+          ok = !!resC?.ok;
+          if (!ok) lastErr = resC?.err || lastErr;
+          if (ok && appShareQrSvg) appShareQrSvg.hidden = true;
+        }
+
+        if (ok) return;
+
+        const msg = lastErr ? String(lastErr.message || lastErr).trim() : "";
+        setHintError(appShareErr, (msg && isQrCapacityError(lastErr)) ? "URL demasiado largo para QR" : "No se pudo renderizar el QR");
+        setAppSharePlaceholder();
+      });
+    });
   }
 
   let _myQrRaf = 0;
