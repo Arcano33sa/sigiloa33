@@ -329,9 +329,14 @@
         <div class="modal-body">
           <div class="qr-wrap">
             <div class="qr-box">
-              <canvas id="myQrCanvas" width="1" height="1" aria-label="Mi QR"></canvas>
+              <div id="myQrSvg" class="qr-svg" aria-label="Mi QR"></div>
+              <canvas id="myQrCanvas" width="1" height="1" aria-label="Mi QR" hidden></canvas>
             </div>
           </div>
+
+          <div id="myQrStatus" class="qr-status" hidden>✓ Listo para escanear</div>
+          <div id="myQrWarn" class="qr-warn" hidden>QR largo: si no escanea, usa Copiar texto QR</div>
+          <div id="myQrErr" class="hint hint-compact danger" hidden></div>
 
           <div class="full" style="margin-top:12px;">
             <label class="label" for="myQrText">Texto QR</label>

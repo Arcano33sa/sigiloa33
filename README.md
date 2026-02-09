@@ -1,4 +1,4 @@
-# Sigilo A33 — v0.1.7 (Etapa 8/8)
+# Sigilo A33 — v0.1.7 (Etapa 8A/2)
 
 App web mobile‑first para cifrar y descifrar mensajes entre contactos usando “candados” (clave pública), con identidad local y libreta de contactos.
 

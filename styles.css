@@ -498,7 +498,84 @@ body{
 /* Etapa 5: QR */
 .hint.danger{ color: var(--danger); }
 .hint-compact.danger{ color: var(--danger); }
-.qr-wrap{ display:flex; justify-content:center; margin: 4px 0 0; }
-.qr-box{ background:#fff; padding:12px; border-radius:16px; border:1px solid var(--border); width:100%; max-width:280px; }
-.qr-box canvas{ display:block; width: 100%; height:auto; }
+
+#myQrModal .modal-body,
+#myQrModal .modal-card{
+  overflow-x: hidden;
+}
+
+.qr-wrap{
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  width: 100%;
+  margin: 4px 0 0;
+}
+
+.qr-box{
+  width: min(360px, 92vw, 100%);
+  max-width: 100%;
+  aspect-ratio: 1 / 1;
+  margin: 0 auto;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(0,0,0,.12);
+  background: #fff;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+.qr-svg{
+  width:100%;
+  height:100%;
+  aspect-ratio: 1 / 1;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:#fff;
+}
+
+.qr-box svg,
+.qr-svg svg{
+  display:block;
+  width:100%;
+  height:100%;
+  max-width:100%;
+  max-height:100%;
+  shape-rendering: crispEdges;
+}
+
+.qr-box canvas{
+  display:block;
+  width: auto;
+  height: auto;
+  max-width:100%;
+  max-height:100%;
+  background:#fff;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.qr-status,
+.qr-warn{
+  margin-top: 10px;
+  border-radius: 12px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.qr-status{
+  border: 1px solid rgba(202,165,106,.45);
+  background: rgba(202,165,106,.12);
+  color: rgba(245,243,239,.95);
+  font-weight: 800;
+}
+
+.qr-warn{
+  border: 1px dashed rgba(255,255,255,.22);
+  background: rgba(255,255,255,.05);
+  color: rgba(245,243,239,.78);
+}
 

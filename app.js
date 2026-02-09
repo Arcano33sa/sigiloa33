@@ -657,7 +657,9 @@
   // ---------- QR (Etapa 5) ----------
   const SIGILO_QR_PREFIX = "SIGILOA33";
   const SIGILO_QR_VERSION = 1;
-  const SIGILO_QR_EC_LEVEL = "M";
+  // Error correction: we auto-pick between L and M to reduce density while keeping scan reliability.
+  const SIGILO_QR_EC_LEVEL_FALLBACK = "M";
+  const SIGILO_QR_WARN_THRESHOLD = 350; // chars
 
   function base64UrlEncodeBytes(bytes){
     let bin = "";
@@ -750,11 +752,43 @@
     return buildSigiloQrPayload(obj);
   }
 
+  function buildQrInstance(text, ecLevel){
+    const level = (ecLevel || SIGILO_QR_EC_LEVEL_FALLBACK);
+    const qr = qrcode(0, level); // typeNumber auto
+    qr.addData(String(text || "").trim());
+    qr.make();
+    return qr;
+  }
+
+  // Pick between L and M. Choose the one that yields fewer modules (less dense).
+  // If tie, prefer M for a bit more resilience.
+  function pickBestQr(text){
+    const t = String(text || "").trim();
+    let qrL = null;
+    let qrM = null;
+    try{ qrL = buildQrInstance(t, "L"); }catch(e){ qrL = null; }
+    try{ qrM = buildQrInstance(t, "M"); }catch(e){ qrM = null; }
+
+    if (qrL && qrM){
+      const nL = qrL.getModuleCount();
+      const nM = qrM.getModuleCount();
+      if (nL < nM) return { qr: qrL, ec: "L" };
+      if (nM < nL) return { qr: qrM, ec: "M" };
+      return { qr: qrM, ec: "M" };
+    }
+    if (qrM) return { qr: qrM, ec: "M" };
+    if (qrL) return { qr: qrL, ec: "L" };
+
+    // last resort
+    const qr = buildQrInstance(t, SIGILO_QR_EC_LEVEL_FALLBACK);
+    return { qr, ec: SIGILO_QR_EC_LEVEL_FALLBACK };
+  }
+
   function renderQrToCanvas(text, canvas){
-    if (!canvas) return;
+    if (!canvas) return false;
     if (typeof qrcode !== "function"){
       toast("QR: librería no cargó");
-      return;
+      return false;
     }
 
     const t = String(text || "").trim();
@@ -762,34 +796,87 @@
       const ctx0 = canvas.getContext("2d");
       canvas.width = 1; canvas.height = 1;
       ctx0 && ctx0.clearRect(0,0,1,1);
-      return;
+      return true;
     }
 
-    const qr = qrcode(0, SIGILO_QR_EC_LEVEL);
-    qr.addData(t);
-    qr.make();
+    let qr;
+    try{
+      qr = pickBestQr(t).qr;
+    }catch(e){
+      return false;
+    }
 
     const count = qr.getModuleCount();
-    const quiet = 4;
-    const scale = 6;
-    const size = (count + quiet*2) * scale;
+    const quiet = 4; // modules
+    const totalModules = count + quiet * 2;
 
-    canvas.width = size;
-    canvas.height = size;
+    // Compute an on-screen size that fits the qr-box without CSS stretching.
+    const box = canvas.closest?.(".qr-box") || canvas.parentElement;
+    let targetCss = 320;
+    try{
+      if (box){
+        const rect = box.getBoundingClientRect();
+        targetCss = Number(rect?.width || targetCss) || targetCss;
+        const cs = window.getComputedStyle ? getComputedStyle(box) : null;
+        const padL = cs ? parseFloat(cs.paddingLeft) || 0 : 0;
+        const padR = cs ? parseFloat(cs.paddingRight) || 0 : 0;
+        targetCss = targetCss - padL - padR;
+      }
+    }catch(e){ /* ignore */ }
+    targetCss = Math.max(160, Math.min(420, targetCss || 320));
+
+    const dpr = Math.max(1, Number(window.devicePixelRatio || 1));
+    const modulePx = Math.max(1, Math.floor((targetCss * dpr) / totalModules));
+    const sizePx = modulePx * totalModules;
+
+    canvas.width = sizePx;
+    canvas.height = sizePx;
+
+    const cssSize = sizePx / dpr;
+    const cssPx = (Math.round(cssSize * 100) / 100).toString();
+    canvas.style.width = cssPx + "px";
+    canvas.style.height = cssPx + "px";
 
     const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    if (!ctx) return false;
+    ctx.imageSmoothingEnabled = false;
 
+    // White background (real #fff) + black modules (#000)
     ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, size, size);
+    ctx.fillRect(0, 0, sizePx, sizePx);
 
     ctx.fillStyle = "#000000";
     for (let r=0; r<count; r++){
+      const y = (r + quiet) * modulePx;
       for (let c=0; c<count; c++){
         if (qr.isDark(r, c)){
-          ctx.fillRect((c+quiet)*scale, (r+quiet)*scale, scale, scale);
+          ctx.fillRect((c + quiet) * modulePx, y, modulePx, modulePx);
         }
       }
+    }
+
+    return true;
+  }
+
+  function renderQrToSvgInline(text, mountEl){
+    if (!mountEl) return false;
+    if (typeof qrcode !== "function") return false;
+
+    const t = String(text || "").trim();
+    if (!t){
+      mountEl.innerHTML = "";
+      return true;
+    }
+
+    try{
+      const { qr } = pickBestQr(t);
+      const cellSize = 4;
+      const margin = cellSize * 4; // quiet zone = 4 modules
+      mountEl.innerHTML = qr.createSvgTag({ cellSize, margin, scalable: true, alt: "Mi QR" });
+      return true;
+    }catch(e){
+      mountEl.innerHTML = "";
+      return false;
     }
   }
 
@@ -1030,8 +1117,12 @@
   const btnShowMyQR = $("#btnShowMyQR");
   const myQrModal = $("#myQrModal");
   const btnCloseMyQrModal = $("#btnCloseMyQrModal");
+  const myQrSvg = $("#myQrSvg");
   const myQrCanvas = $("#myQrCanvas");
   const myQrText = $("#myQrText");
+  const myQrStatus = $("#myQrStatus");
+  const myQrWarn = $("#myQrWarn");
+  const myQrErr = $("#myQrErr");
   const btnCopyMyQrText = $("#btnCopyMyQrText");
   const btnCopyMyCandado = $("#btnCopyMyCandado");
 
@@ -1154,6 +1245,14 @@
       await copyToClipboard(t);
       toast("Candado copiado");
     });
+
+    // Rotación / resize: mantener el QR visible
+    window.addEventListener("resize", () => {
+      if (myQrModal && !myQrModal.hidden){
+        clearTimeout(_myQrResizeTimer);
+        _myQrResizeTimer = setTimeout(scheduleMyQrRender, 120);
+      }
+    });
   }
 
   function openMyQr(){
@@ -1163,12 +1262,74 @@
       return;
     }
     if (myQrText) myQrText.value = t;
-    renderQrToCanvas(t, myQrCanvas);
+    setHintError(myQrErr, "");
+    if (myQrStatus) myQrStatus.hidden = true;
+    if (myQrWarn) myQrWarn.hidden = true;
+    if (myQrSvg) myQrSvg.innerHTML = "";
     openModal(myQrModal);
+    scheduleMyQrRender();
   }
 
   function closeMyQr(){
+    if (_myQrRaf) cancelAnimationFrame(_myQrRaf);
+    _myQrRaf = 0;
     closeModal(myQrModal);
+  }
+
+  let _myQrRaf = 0;
+  let _myQrResizeTimer = null;
+
+  function scheduleMyQrRender(){
+    if (!myQrModal || myQrModal.hidden) return;
+    const t = (myQrText?.value || "").trim();
+    if (!t) return;
+
+    const warnLong = t.length > SIGILO_QR_WARN_THRESHOLD;
+    if (myQrStatus) myQrStatus.hidden = true;
+    if (myQrWarn) myQrWarn.hidden = true;
+
+    if (_myQrRaf) cancelAnimationFrame(_myQrRaf);
+    _myQrRaf = requestAnimationFrame(() => {
+      _myQrRaf = 0;
+      // 2 frames to guarantee modal visible before rendering (iPad Safari)
+      requestAnimationFrame(() => {
+        let ok = false;
+
+        if (myQrSvg){
+          myQrSvg.hidden = false;
+          ok = renderQrToSvgInline(t, myQrSvg);
+        }
+        if (ok){
+          if (myQrCanvas) myQrCanvas.hidden = true;
+          setHintError(myQrErr, "");
+          if (myQrStatus) myQrStatus.hidden = false;
+          if (myQrWarn) myQrWarn.hidden = !warnLong;
+          return;
+        }
+
+        // Fallback canvas (still rendered after modal is visible)
+        let okCanvas = false;
+        try{
+          if (myQrCanvas){
+            myQrCanvas.hidden = false;
+            okCanvas = renderQrToCanvas(t, myQrCanvas);
+          }
+        }catch(e){ okCanvas = false; }
+
+        if (okCanvas){
+          if (myQrSvg) myQrSvg.hidden = true;
+          setHintError(myQrErr, "");
+          if (myQrStatus) myQrStatus.hidden = false;
+          if (myQrWarn) myQrWarn.hidden = !warnLong;
+          return;
+        }
+
+        if (myQrSvg) myQrSvg.hidden = true;
+        if (myQrStatus) myQrStatus.hidden = true;
+        if (myQrWarn) myQrWarn.hidden = true;
+        setHintError(myQrErr, "No se pudo renderizar el QR. Intenta Copiar texto QR.");
+      });
+    });
   }
 
   // ---------- Backup UI actions (Etapa 8) ----------

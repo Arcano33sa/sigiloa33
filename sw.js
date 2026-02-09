@@ -1,5 +1,5 @@
 /* Sigilo A33 — SW (Etapa 5) */
-const CACHE = "sigilo-a33-v0.1.4";
+const CACHE = "sigilo-a33-v0.1.8-8b";
 const ASSETS = [
   "./",
   "./index.html",
