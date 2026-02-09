@@ -1,6 +1,13 @@
 (() => {
   const SCREENS = ["encrypt","decrypt","contacts","profile"];
 
+  // Build stamp (Etapa 8E): visible para diagnóstico anti-caché/SW
+  const BUILD_ID = "v0.2.4-20260209T2151Z";
+
+  // Service Worker versionado por archivo (Etapa 8F)
+  const SW_VERSIONED_FILE = "./sw-v0.2.4.js";
+  const SW_BRIDGE_FILE = "./sw.js";
+
   // Sigilo A33 — Identidad local (Etapa 2)
   const DB_NAME = "sigilo-a33";
   const DB_VER = 2;
@@ -105,7 +112,161 @@
     return [iosLine, andLine];
   }
 
-  // ---------- Storage (IndexedDB con fallback localStorage) ----------
+  // ---------- Diagnóstico SW (Etapa 8E) ----------
+  const swYesNo = (v) => (v ? "sí" : "no");
+  let _swDiag = { supported:false, registered:false, active:false, controlling:false, state:"-", cache:"-", script:"-" };
+  let _myQrLastDiag = null;
+
+  function swSnapshot(){
+    const supported = ("serviceWorker" in navigator);
+    const controlling = supported ? !!navigator.serviceWorker.controller : false;
+    _swDiag = { ..._swDiag, supported, controlling };
+    return _swDiag;
+  }
+
+  async function swRequestInfo(timeoutMs=650){
+    if (!("serviceWorker" in navigator)) return null;
+    try{
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sw = (navigator.serviceWorker.controller || reg?.active || reg?.waiting || reg?.installing);
+      if (!sw || typeof sw.postMessage !== "function") return null;
+
+      return await new Promise((resolve) => {
+        const ch = new MessageChannel();
+        const t = setTimeout(() => resolve(null), timeoutMs);
+        ch.port1.onmessage = (ev) => {
+          clearTimeout(t);
+          resolve(ev?.data || null);
+        };
+        try{
+          sw.postMessage({ type: "GET_SW_INFO" }, [ch.port2]);
+        }catch(_e){
+          clearTimeout(t);
+          resolve(null);
+        }
+      });
+    }catch(_e){
+      return null;
+    }
+  }
+
+  async function refreshSwDiag(){
+    const out = { supported:false, registered:false, active:false, controlling:false, state:"-", cache:"-", script:"-" };
+    if (!("serviceWorker" in navigator)){
+      _swDiag = out;
+      return out;
+    }
+
+    out.supported = true;
+    out.controlling = !!navigator.serviceWorker.controller;
+
+    try{
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg){
+        out.registered = true;
+        out.active = !!reg.active;
+        out.state = String(reg.active?.state || reg.waiting?.state || reg.installing?.state || "-");
+      }
+    }catch(_e){}
+
+    const info = await swRequestInfo(650);
+    if (info && typeof info === "object"){
+      const c = info.cache || info.cacheName || info.CACHE || "";
+      if (c) out.cache = String(c);
+      const s = info.script || info.scriptURL || info.url || "";
+      if (s){
+        try{ out.script = new URL(String(s), location.href).pathname.split("/").pop() || "-"; }catch(_e){ out.script = String(s); }
+      }
+    }
+
+    _swDiag = out;
+    // Si el modal está abierto, refrescar Detalles sin depender de consola.
+    if (typeof updateMyQrDiagUI === "function"){
+      try{ updateMyQrDiagUI(true); }catch(_e){}
+    }
+    return out;
+  }
+
+  
+  // ---------- Salida de emergencia: Reparar caché/SW (Etapa 8F) ----------
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+  async function repairCacheRescue(){
+    // No toca identidad/contactos (IndexedDB/localStorage).
+    // Solo SW + Cache Storage.
+    const online = (typeof navigator.onLine === "boolean") ? navigator.onLine : true;
+    if (!online){
+      toast("Sin internet: conectate y reintenta");
+      return;
+    }
+
+    const ok = confirm("Reparar caché y recargar? (no borra tu identidad ni contactos)");
+    if (!ok) return;
+
+    toast("Reparando caché…");
+
+    const scopeUrl = (() => {
+      try{ return new URL("./", location.href).href; }catch(_e){ return ""; }
+    })();
+
+    // 1) Update/skip waiting (best-effort)
+    if ("serviceWorker" in navigator){
+      try{
+        const regs = await navigator.serviceWorker.getRegistrations();
+        for (const reg of regs){
+          try{ await reg.update(); }catch(_e){}
+          try{ reg.waiting && reg.waiting.postMessage && reg.waiting.postMessage({ type: "SKIP_WAITING" }); }catch(_e){}
+        }
+      }catch(_e){}
+    }
+
+    // 2) Unregister SW for this app scope (best-effort)
+    if ("serviceWorker" in navigator){
+      try{
+        const regs = await navigator.serviceWorker.getRegistrations();
+        for (const reg of regs){
+          try{
+            const sc = String(reg.scope || "");
+            const mine = scopeUrl && sc && sc.startsWith(scopeUrl);
+            if (mine){
+              await reg.unregister();
+            }
+          }catch(_e){}
+        }
+      }catch(_e){}
+    }
+
+    // 3) Delete app caches (Cache Storage)
+    if ("caches" in window){
+      try{
+        const keys = await caches.keys();
+        const del = [];
+        for (const k of keys){
+          const ks = String(k || "");
+          if (!ks) continue;
+          // Borrado amplio pero acotado a Sigilo
+          if (ks.startsWith("sigilo-a33-") || ks.includes("sigilo") || ks.includes("SIGILO")){
+            del.push(caches.delete(k));
+          }
+        }
+        await Promise.all(del);
+      }catch(_e){}
+    }
+
+    // 4) Force reload with cache-bust param (keep hash)
+    await sleep(120);
+    try{
+      const h = String(location.hash || "");
+      const u = new URL(location.href);
+      u.searchParams.set("r", String(Date.now()));
+      u.hash = h;
+      location.replace(u.toString());
+    }catch(_e){
+      location.reload();
+    }
+  }
+
+// ---------- Storage (IndexedDB con fallback localStorage) ----------
   function openDB(){
     return new Promise((resolve, reject) => {
       if (!("indexedDB" in window)) return reject(new Error("IndexedDB no disponible"));
@@ -814,7 +975,7 @@
   }
 
   function qrCauseLabel(code){
-    if (code === "A") return "A) Librería QR no cargó";
+    if (code === "A") return "A) Librería QR no cargó (probable caché/SW viejo)";
     if (code === "B") return "B) Texto QR demasiado largo para QR";
     if (code === "C") return "C) Error interno al renderizar";
     return "";
@@ -859,6 +1020,43 @@
 
   function clearMyQrPlaceholder(){
     if (myQrSvg) myQrSvg.innerHTML = "";
+  }
+
+  function composeMyQrDetailsLines(diag){
+    const d = diag || {};
+    const len = Number(d.len || 0) || 0;
+    const libOk = !!d.libOk;
+    const attempted = Array.isArray(d.attempted) ? d.attempted : [];
+    const usedRenderer = String(d.usedRenderer || "-");
+    const ecUsed = String(d.ecUsed || "-");
+    const errMsg = String(d.errMsg || "").trim();
+
+    const sw = _swDiag || swSnapshot();
+    const swLine = sw.supported
+      ? `SW: reg ${swYesNo(sw.registered)} | activo ${swYesNo(sw.active)} | controlando ${swYesNo(sw.controlling)}${sw.state && sw.state !== "-" ? ` | ${sw.state}` : ""}`
+      : "SW: no soportado";
+    const swCache = sw.supported ? `SW cache: ${String(sw.cache || "-")}` : "";
+
+    const out = [
+      `Build: ${BUILD_ID}`,
+      `Len: ${len}`,
+      `Lib: ${libOk ? "OK" : "NO"}`,
+      swLine,
+      swCache,
+      (sw.supported && sw.script && sw.script !== "-" ? `SW file: ${sw.script}` : ""),
+      `Renderer: ${attempted.join(" → ") || "-"}`,
+      `Usado: ${usedRenderer || "-"}`,
+      `EC: ${ecUsed || "-"}`,
+    ];
+    if (errMsg) out.push(`Err: ${errMsg}`);
+    return out.filter(Boolean);
+  }
+
+  function updateMyQrDiagUI(force){
+    if (!myQrModal || myQrModal.hidden) return;
+    if (force) renderBuildStamps();
+    if (!_myQrLastDiag) return;
+    setMyQrDetailsInfo(composeMyQrDetailsLines(_myQrLastDiag));
   }
 
 
@@ -1242,6 +1440,10 @@
   const btnCopyFp = $("#btnCopyFingerprint");
   const btnShowMyQR = $("#btnShowMyQR");
 
+  // Build stamps (Etapa 8E)
+  const buildStampProfile = $("#buildStampProfile");
+  const myQrBuildStamp = $("#myQrBuildStamp");
+
   // Compartir app (Etapa 9A)
   const btnShowAppQr = $("#btnShowAppQr");
   const btnCopyAppLink = $("#btnCopyAppLink");
@@ -1268,6 +1470,7 @@
   const myQrDetailsBody = $("#myQrDetailsBody");
   const btnCopyMyQrText = $("#btnCopyMyQrText");
   const btnCopyMyCandado = $("#btnCopyMyCandado");
+  const btnRepairCache = $("#btnRepairCache");
 
   // Backup UI (Etapa 8)
   const bePass = $("#backupExportPass");
@@ -1296,6 +1499,15 @@
   let _backupLastExportText = "";
   let _pendingBackup = null;
   let _importBusy = false;
+
+  function renderBuildStamps(){
+    const txt = `Build: ${BUILD_ID}`;
+    if (buildStampProfile) buildStampProfile.textContent = txt;
+    if (myQrBuildStamp) myQrBuildStamp.textContent = txt;
+  }
+
+  // Siempre visible, incluso antes de cargar identidad.
+  renderBuildStamps();
 
 
   let saveTimer = null;
@@ -1389,6 +1601,11 @@
       toast("Candado copiado");
     });
 
+    // Salida de emergencia (Etapa 8F)
+    btnRepairCache?.addEventListener("click", () => {
+      try{ repairCacheRescue(); }catch(_e){ location.reload(); }
+    });
+
     // Compartir app (Etapa 9A) — SOLO URL
     btnShowAppQr?.addEventListener("click", () => openAppShare());
 
@@ -1457,6 +1674,11 @@
     setMyQrDetailsInfo([]);
     if (myQrSvg){ myQrSvg.hidden = false; myQrSvg.innerHTML = ""; }
     if (myQrCanvas) myQrCanvas.hidden = true;
+
+    // Diagnóstico visible (build + SW)
+    renderBuildStamps();
+    swSnapshot();
+    refreshSwDiag();
 
     openModal(myQrModal);
     scheduleMyQrRender();
@@ -1592,6 +1814,11 @@
     clearMyQrPlaceholder();
     if (myQrCanvas) myQrCanvas.hidden = true;
 
+    // Diagnóstico visible aunque el render tarde o falle
+    swSnapshot();
+    _myQrLastDiag = { len: t.length, libOk: isQrLibOk(), attempted: [], usedRenderer: "-", ecUsed: "-", errMsg: "" };
+    updateMyQrDiagUI();
+
     if (_myQrRaf) cancelAnimationFrame(_myQrRaf);
     _myQrRaf = requestAnimationFrame(() => {
       _myQrRaf = 0;
@@ -1638,13 +1865,15 @@
         if (ok){
           setMyQrStatusMsg(true);
           setMyQrWarnMsg(warnLong ? "QR largo: si no escanea, usa Copiar texto QR" : "", false);
-          setMyQrDetailsInfo([
-            `Len: ${t.length}`,
-            `Lib: ${libOk ? "OK" : "NO"}`,
-            `Renderer: ${attempted.join(" → ") || "-"}`,
-            `Usado: ${usedRenderer || "-"}`,
-            `EC: ${ecUsed || "-"}`,
-          ]);
+          _myQrLastDiag = {
+            len: t.length,
+            libOk,
+            attempted,
+            usedRenderer: usedRenderer || "-",
+            ecUsed: ecUsed || "-",
+            errMsg: ""
+          };
+          updateMyQrDiagUI();
           return;
         }
 
@@ -1669,14 +1898,15 @@
 
         // Minimal tech details (colapsable)
         const errMsg = lastErr ? String(lastErr.message || lastErr).trim() : "-";
-        setMyQrDetailsInfo([
-          `Len: ${t.length}`,
-          `Lib: ${libOk ? "OK" : "NO"}`,
-          `Renderer: ${attempted.join(" → ") || "-"}`,
-          `Usado: ${usedRenderer || "-"}`,
-          `EC: ${ecUsed || "-"}`,
-          `Err: ${errMsg}`,
-        ]);
+        _myQrLastDiag = {
+          len: t.length,
+          libOk,
+          attempted,
+          usedRenderer: usedRenderer || "-",
+          ecUsed: ecUsed || "-",
+          errMsg
+        };
+        updateMyQrDiagUI();
       });
     });
   }
@@ -2717,7 +2947,24 @@ Contactos: ${n}`;
   // PWA: register SW (safe no-op if not supported)
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./sw.js").catch(() => {});
+      navigator.serviceWorker.register(SW_VERSIONED_FILE)
+        .then(() => { try{ refreshSwDiag(); }catch(_e){} })
+        .catch(() => { try{ navigator.serviceWorker.register(SW_BRIDGE_FILE).catch(() => {}); }catch(_e){} });
     });
   }
+
+    // Puente: si un SW viejo te avisa que está en modo rescate, re-registra el SW versionado.
+    try{
+      navigator.serviceWorker.addEventListener("message", (ev) => {
+        const d = ev && ev.data ? ev.data : null;
+        if (!d || typeof d !== "object") return;
+        if (d.type !== "SW_BRIDGE_TO_VERSIONED") return;
+        // Best-effort: intenta migrar al SW versionado y recarga.
+        navigator.serviceWorker.register(SW_VERSIONED_FILE).then(() => {
+          try{ refreshSwDiag(); }catch(_e){}
+          try{ location.reload(); }catch(_e){}
+        }).catch(() => {});
+      });
+    }catch(_e){}
+
 })();

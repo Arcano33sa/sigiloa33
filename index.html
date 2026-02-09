@@ -144,6 +144,8 @@
           </div>
 
           <div class="hint">La llave privada nunca se muestra. Ni aunque la invites a cenar.</div>
+
+          <div id="buildStampProfile" class="build-stamp" aria-label="Build ID"></div>
         </div>
 
         <div class="card">
@@ -346,6 +348,7 @@
 
           <div id="myQrStatus" class="qr-status" hidden>✓ Listo para escanear</div>
           <div id="myQrWarn" class="qr-warn" hidden>QR largo: si no escanea, usa Copiar texto QR</div>
+          <div id="myQrBuildStamp" class="build-stamp build-stamp-qr" aria-label="Build ID"></div>
           <details id="myQrDetails" class="qr-details">
             <summary>Detalles</summary>
             <div id="myQrDetailsBody" class="qr-details-body"></div>
@@ -359,6 +362,7 @@
           </div>
         </div>
         <div class="modal-actions">
+          <button id="btnRepairCache" class="btn danger" type="button">Reparar caché</button>
           <button id="btnCopyMyQrText" class="btn" type="button">Copiar texto QR</button>
           <button id="btnCopyMyCandado" class="btn" type="button">Copiar candado</button>
         </div>

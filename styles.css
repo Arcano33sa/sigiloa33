@@ -335,12 +335,13 @@ body{
 }
 .modal-actions{
   display:flex;
+  flex-wrap:wrap;
   gap: 10px;
   padding: 12px;
   border-top: 1px solid rgba(255,255,255,.08);
 }
 .modal-actions .btn{
-  flex:1;
+  flex: 1 1 140px;
   height: 42px;
 }
 .modal-actions .btn.primary{
@@ -658,5 +659,17 @@ body{
   border: 1px dashed rgba(255,255,255,.22);
   background: rgba(255,255,255,.05);
   color: rgba(245,243,239,.78);
+}
+
+.build-stamp{
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.2;
+  color: rgba(245,243,239,.6);
+  word-break: break-word;
+}
+
+.build-stamp-qr{
+  margin-top: 8px;
 }
 
