@@ -760,6 +760,87 @@
     return qr;
   }
 
+  function isQrLibOk(){
+    return (typeof qrcode === "function");
+  }
+
+  function isQrCapacityError(err){
+    const msg = (err && err.message) ? String(err.message) : String(err || "");
+    return /overflow|too long|data too long|code length/i.test(msg);
+  }
+
+  function qrCauseLabel(code){
+    if (code === "A") return "A) Librería QR no cargó";
+    if (code === "B") return "B) Texto QR demasiado largo para QR";
+    if (code === "C") return "C) Error interno al renderizar";
+    return "";
+  }
+
+  function setMyQrWarnMsg(msg, danger){
+    if (!myQrWarn) return;
+    const m = String(msg || "").trim();
+    myQrWarn.textContent = m;
+    myQrWarn.hidden = !m;
+    if (danger) myQrWarn.classList.add("danger");
+    else myQrWarn.classList.remove("danger");
+  }
+
+  function setMyQrStatusMsg(ok){
+    if (!myQrStatus) return;
+    if (ok){
+      myQrStatus.textContent = "✓ Listo para escanear";
+      myQrStatus.hidden = false;
+    }else{
+      myQrStatus.hidden = true;
+    }
+  }
+
+  function setMyQrDetailsInfo(info){
+    if (!myQrDetails || !myQrDetailsBody) return;
+    const lines = Array.isArray(info) ? info : [];
+    myQrDetailsBody.textContent = lines.filter(Boolean).join("\n");
+  }
+
+  function setMyQrPlaceholder(code){
+    if (!myQrSvg) return;
+    const cause = qrCauseLabel(code);
+    myQrSvg.hidden = false;
+    myQrSvg.innerHTML = `
+      <div class="qr-placeholder">
+        <div class="qr-ph-title">QR no disponible</div>
+        <div class="qr-ph-cause">${cause || ""}</div>
+      </div>`;
+    if (myQrCanvas) myQrCanvas.hidden = true;
+  }
+
+  function clearMyQrPlaceholder(){
+    if (myQrSvg) myQrSvg.innerHTML = "";
+  }
+
+
+
+  function pickBestQrDiag(text){
+    const t = String(text || "").trim();
+    let qrL = null, qrM = null;
+    let errL = null, errM = null;
+    try{ qrL = buildQrInstance(t, "L"); }catch(e){ errL = e; qrL = null; }
+    try{ qrM = buildQrInstance(t, "M"); }catch(e){ errM = e; qrM = null; }
+
+    if (qrL && qrM){
+      const nL = qrL.getModuleCount();
+      const nM = qrM.getModuleCount();
+      if (nL < nM) return { qr: qrL, ec: "L", errL, errM };
+      if (nM < nL) return { qr: qrM, ec: "M", errL, errM };
+      return { qr: qrM, ec: "M", errL, errM };
+    }
+    if (qrM) return { qr: qrM, ec: "M", errL, errM };
+    if (qrL) return { qr: qrL, ec: "L", errL, errM };
+
+    const err = errM || errL || new Error("QR make failed");
+    try{ err.__sigilo_qr = { errL, errM }; }catch(_e){}
+    throw err;
+  }
+
   // Pick between L and M. Choose the one that yields fewer modules (less dense).
   // If tie, prefer M for a bit more resilience.
   function pickBestQr(text){
@@ -785,10 +866,10 @@
   }
 
   function renderQrToCanvas(text, canvas){
-    if (!canvas) return false;
-    if (typeof qrcode !== "function"){
-      toast("QR: librería no cargó");
-      return false;
+    if (!canvas) return { ok:false, ec:null, err:new Error("NO_CANVAS") };
+
+    if (!isQrLibOk()){
+      return { ok:false, ec:null, err:new Error("QR_LIB_MISSING") };
     }
 
     const t = String(text || "").trim();
@@ -796,16 +877,17 @@
       const ctx0 = canvas.getContext("2d");
       canvas.width = 1; canvas.height = 1;
       ctx0 && ctx0.clearRect(0,0,1,1);
-      return true;
+      return { ok:true, ec:null, err:null };
     }
 
-    let qr;
+    let qrPack;
     try{
-      qr = pickBestQr(t).qr;
+      qrPack = pickBestQrDiag(t);
     }catch(e){
-      return false;
+      return { ok:false, ec:null, err:e };
     }
 
+    const qr = qrPack.qr;
     const count = qr.getModuleCount();
     const quiet = 4; // modules
     const totalModules = count + quiet * 2;
@@ -838,7 +920,7 @@
     canvas.style.height = cssPx + "px";
 
     const ctx = canvas.getContext("2d");
-    if (!ctx) return false;
+    if (!ctx) return { ok:false, ec:qrPack.ec, err:new Error("NO_CTX") };
     ctx.imageSmoothingEnabled = false;
 
     // White background (real #fff) + black modules (#000)
@@ -855,28 +937,28 @@
       }
     }
 
-    return true;
+    return { ok:true, ec:qrPack.ec, err:null };
   }
 
   function renderQrToSvgInline(text, mountEl){
-    if (!mountEl) return false;
-    if (typeof qrcode !== "function") return false;
+    if (!mountEl) return { ok:false, ec:null, err:new Error("NO_MOUNT") };
+    if (!isQrLibOk()) return { ok:false, ec:null, err:new Error("QR_LIB_MISSING") };
 
     const t = String(text || "").trim();
     if (!t){
       mountEl.innerHTML = "";
-      return true;
+      return { ok:true, ec:null, err:null };
     }
 
     try{
-      const { qr } = pickBestQr(t);
+      const { qr, ec } = pickBestQrDiag(t);
       const cellSize = 4;
       const margin = cellSize * 4; // quiet zone = 4 modules
       mountEl.innerHTML = qr.createSvgTag({ cellSize, margin, scalable: true, alt: "Mi QR" });
-      return true;
+      return { ok:true, ec, err:null };
     }catch(e){
       mountEl.innerHTML = "";
-      return false;
+      return { ok:false, ec:null, err:e };
     }
   }
 
@@ -1123,6 +1205,8 @@
   const myQrStatus = $("#myQrStatus");
   const myQrWarn = $("#myQrWarn");
   const myQrErr = $("#myQrErr");
+  const myQrDetails = $("#myQrDetails");
+  const myQrDetailsBody = $("#myQrDetailsBody");
   const btnCopyMyQrText = $("#btnCopyMyQrText");
   const btnCopyMyCandado = $("#btnCopyMyCandado");
 
@@ -1262,10 +1346,16 @@
       return;
     }
     if (myQrText) myQrText.value = t;
+
+    // Reset QR modal UI
     setHintError(myQrErr, "");
-    if (myQrStatus) myQrStatus.hidden = true;
-    if (myQrWarn) myQrWarn.hidden = true;
-    if (myQrSvg) myQrSvg.innerHTML = "";
+    setMyQrStatusMsg(false);
+    setMyQrWarnMsg("", false);
+    if (myQrDetails) myQrDetails.open = false;
+    setMyQrDetailsInfo([]);
+    if (myQrSvg){ myQrSvg.hidden = false; myQrSvg.innerHTML = ""; }
+    if (myQrCanvas) myQrCanvas.hidden = true;
+
     openModal(myQrModal);
     scheduleMyQrRender();
   }
@@ -1285,49 +1375,101 @@
     if (!t) return;
 
     const warnLong = t.length > SIGILO_QR_WARN_THRESHOLD;
-    if (myQrStatus) myQrStatus.hidden = true;
-    if (myQrWarn) myQrWarn.hidden = true;
+
+    // Reset UI (no consola)
+    setHintError(myQrErr, "");
+    setMyQrStatusMsg(false);
+    setMyQrWarnMsg("", false);
+    if (myQrDetails) myQrDetails.open = false;
+    setMyQrDetailsInfo([]);
+    clearMyQrPlaceholder();
+    if (myQrCanvas) myQrCanvas.hidden = true;
 
     if (_myQrRaf) cancelAnimationFrame(_myQrRaf);
     _myQrRaf = requestAnimationFrame(() => {
       _myQrRaf = 0;
       // 2 frames to guarantee modal visible before rendering (iPad Safari)
       requestAnimationFrame(() => {
-        let ok = false;
+        const libOk = isQrLibOk();
+        const attempted = [];
+        let usedRenderer = "";
+        let ecUsed = null;
+        let lastErr = null;
 
+        // Try SVG first
+        let ok = false;
         if (myQrSvg){
           myQrSvg.hidden = false;
-          ok = renderQrToSvgInline(t, myQrSvg);
-        }
-        if (ok){
-          if (myQrCanvas) myQrCanvas.hidden = true;
-          setHintError(myQrErr, "");
-          if (myQrStatus) myQrStatus.hidden = false;
-          if (myQrWarn) myQrWarn.hidden = !warnLong;
-          return;
-        }
-
-        // Fallback canvas (still rendered after modal is visible)
-        let okCanvas = false;
-        try{
-          if (myQrCanvas){
-            myQrCanvas.hidden = false;
-            okCanvas = renderQrToCanvas(t, myQrCanvas);
+          attempted.push("SVG");
+          const resSvg = renderQrToSvgInline(t, myQrSvg);
+          ok = !!resSvg?.ok;
+          if (ok){
+            usedRenderer = "SVG";
+            ecUsed = resSvg.ec || null;
+          }else{
+            lastErr = resSvg?.err || null;
           }
-        }catch(e){ okCanvas = false; }
+        }
 
-        if (okCanvas){
-          if (myQrSvg) myQrSvg.hidden = true;
-          setHintError(myQrErr, "");
-          if (myQrStatus) myQrStatus.hidden = false;
-          if (myQrWarn) myQrWarn.hidden = !warnLong;
+        // Fallback canvas
+        if (!ok){
+          if (myQrCanvas){
+            attempted.push("canvas");
+            myQrCanvas.hidden = false;
+            const resC = renderQrToCanvas(t, myQrCanvas);
+            ok = !!resC?.ok;
+            if (ok){
+              usedRenderer = "canvas";
+              ecUsed = resC.ec || null;
+              if (myQrSvg) myQrSvg.hidden = true;
+            }else{
+              lastErr = resC?.err || lastErr;
+            }
+          }
+        }
+
+        if (ok){
+          setMyQrStatusMsg(true);
+          setMyQrWarnMsg(warnLong ? "QR largo: si no escanea, usa Copiar texto QR" : "", false);
+          setMyQrDetailsInfo([
+            `Len: ${t.length}`,
+            `Lib: ${libOk ? "OK" : "NO"}`,
+            `Renderer: ${attempted.join(" → ") || "-"}`,
+            `Usado: ${usedRenderer || "-"}`,
+            `EC: ${ecUsed || "-"}`,
+          ]);
           return;
         }
 
-        if (myQrSvg) myQrSvg.hidden = true;
-        if (myQrStatus) myQrStatus.hidden = true;
-        if (myQrWarn) myQrWarn.hidden = true;
-        setHintError(myQrErr, "No se pudo renderizar el QR. Intenta Copiar texto QR.");
+        // Determine exact cause A/B/C
+        let cause = "C";
+        if (!libOk) cause = "A";
+        else{
+          const e0 = lastErr;
+          const eL = e0 && e0.__sigilo_qr ? e0.__sigilo_qr.errL : null;
+          const eM = e0 && e0.__sigilo_qr ? e0.__sigilo_qr.errM : null;
+          if (isQrCapacityError(e0) || isQrCapacityError(eL) || isQrCapacityError(eM)){
+            cause = "B";
+          }else if (!e0){
+            cause = "";
+          }
+        }
+
+        const msg = cause ? qrCauseLabel(cause) : "No se pudo renderizar el QR. Intenta Copiar texto QR.";
+        setMyQrStatusMsg(false);
+        setMyQrWarnMsg(msg, true);
+        setMyQrPlaceholder(cause || "C");
+
+        // Minimal tech details (colapsable)
+        const errMsg = lastErr ? String(lastErr.message || lastErr).trim() : "-";
+        setMyQrDetailsInfo([
+          `Len: ${t.length}`,
+          `Lib: ${libOk ? "OK" : "NO"}`,
+          `Renderer: ${attempted.join(" → ") || "-"}`,
+          `Usado: ${usedRenderer || "-"}`,
+          `EC: ${ecUsed || "-"}`,
+          `Err: ${errMsg}`,
+        ]);
       });
     });
   }

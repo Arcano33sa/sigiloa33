@@ -1,5 +1,7 @@
-/* Sigilo A33 — SW (Etapa 5) */
-const CACHE = "sigilo-a33-v0.1.8-8b";
+/* Sigilo A33 — SW (Etapa 8D) */
+// HARDENING: nunca devolver index.html a requests de assets (.js/.css/.png/etc)
+// para evitar que el navegador reciba HTML como si fuera JS (típico "QR en blanco" en iPad/PWA).
+const CACHE = "sigilo-a33-v0.2.0-8d";
 const ASSETS = [
   "./",
   "./index.html",
@@ -35,16 +37,40 @@ self.addEventListener("fetch", (event) => {
   // Only handle same-origin GET
   if (req.method !== "GET" || url.origin !== self.location.origin) return;
 
-  event.respondWith(
-    caches.match(req).then((cached) => {
-      if (cached) return cached;
-      return fetch(req)
+  const isNavigate = (req.mode === "navigate") || (req.destination === "document");
+
+  // NAVIGATION (HTML/document): permitir fallback a index.html
+  if (isNavigate) {
+    event.respondWith(
+      fetch(req)
         .then((res) => {
+          // Cache navigation responses opportunistically (best-effort)
           const copy = res.clone();
           caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
           return res;
         })
-        .catch(() => caches.match("./index.html"));
+        .catch(() =>
+          caches.match(req).then((cached) => cached || caches.match("./index.html"))
+        )
+    );
+    return;
+  }
+
+  // ASSETS (JS/CSS/IMGS/JSON/etc): NUNCA devolver index.html.
+  // Cache-first; si no hay cache y falla red, devolver error de red (pero no HTML).
+  event.respondWith(
+    caches.match(req, { ignoreSearch: true }).then((cached) => {
+      if (cached) return cached;
+      return fetch(req)
+        .then((res) => {
+          // Solo cachear respuestas OK. (Evita guardar errores intermedios)
+          if (res && res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+          }
+          return res;
+        })
+        .catch(() => new Response("", { status: 504, statusText: "Offline" }));
     })
   );
 });
