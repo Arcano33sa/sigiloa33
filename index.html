@@ -157,17 +157,6 @@
             <button id="btnShowMyQR" class="btn" type="button">Mostrar QR</button>
           </div>
         </div>
-
-        <div class="card">
-          <div class="card-title">Compartir app</div>
-          <div class="muted">Comparte el enlace de descarga. El QR contiene solo el URL de la app.</div>
-          <div class="btnrow">
-            <button id="btnShowAppQr" class="btn" type="button">Mostrar QR de descarga</button>
-            <button id="btnCopyAppLink" class="btn" type="button">Copiar enlace</button>
-            <button id="btnShareAppLink" class="btn" type="button">Compartir enlace</button>
-          </div>
-        </div>
-
         <div class="card">
           <div class="card-title">Backup</div>
           <div class="hint hint-compact">Respaldo cifrado de <b>identidad</b> y <b>contactos</b>. Sin contraseña, no hay magia.</div>
@@ -368,45 +357,6 @@
         </div>
       </div>
     </div>
-
-    <!-- Modal: Compartir app (Etapa 9A) -->
-    <div id="appShareModal" class="modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="appShareModalTitle">
-      <div class="modal-backdrop" data-close="1"></div>
-      <div class="modal-card">
-        <div class="modal-head">
-          <div id="appShareModalTitle" class="modal-title">Descargar Sigilo A33</div>
-          <button id="btnCloseAppShareModal" class="iconbtn" type="button" aria-label="Cerrar">✕</button>
-        </div>
-        <div class="modal-body">
-          <div class="qr-wrap">
-            <div class="qr-box">
-              <div id="appShareQrSvg" class="qr-svg" aria-label="QR de descarga"></div>
-              <canvas id="appShareQrCanvas" width="1" height="1" aria-label="QR de descarga" hidden></canvas>
-            </div>
-          </div>
-
-          <div class="full" style="margin-top:12px;">
-            <div class="label" style="margin-top:0;">URL</div>
-            <input id="appShareUrl" class="input mono input-mini" type="text" readonly />
-            <div class="hint hint-compact">Copia este enlace o escanea el QR. Aquí no viaja nada personal.</div>
-
-            <!-- Ayuda PWA (Etapa 9B) -->
-            <div id="appSharePwaInstalled" class="hint hint-compact ok" hidden>Ya está agregada a inicio ✅</div>
-            <div id="appSharePwaHelp" class="hint hint-compact pwa-help" hidden></div>
-          </div>
-
-          <div id="appShareErr" class="hint hint-compact danger" hidden></div>
-        </div>
-        <div class="modal-actions">
-          <button id="btnCloseAppShareModal2" class="btn" type="button">Cerrar</button>
-        </div>
-      </div>
-    </div>
-
-
-  </div>
-
-
 
     <!-- Modal: Reemplazar identidad (Etapa 8) -->
     <div id="replaceIdentityModal" class="modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="replaceIdentityTitle">
