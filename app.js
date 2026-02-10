@@ -2,10 +2,10 @@
   const SCREENS = ["encrypt","decrypt","contacts","profile"];
 
   // Build stamp (Etapa 8E): visible para diagnóstico anti-caché/SW
-  const BUILD_ID = "v0.2.4-20260209T2151Z";
+  const BUILD_ID = "v0.2.5-20260210T1422Z";
 
   // Service Worker versionado por archivo (Etapa 8F)
-  const SW_VERSIONED_FILE = "./sw-v0.2.4.js";
+  const SW_VERSIONED_FILE = "./sw-v0.2.5.js";
   const SW_BRIDGE_FILE = "./sw.js";
 
   // Sigilo A33 — Identidad local (Etapa 2)

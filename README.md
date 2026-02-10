@@ -1,4 +1,4 @@
-# Sigilo A33 — v0.2.4 (Etapa 8F/2)
+# Sigilo A33 — v0.2.5 (Etapa 8G/1)
 
 App web mobile‑first para cifrar y descifrar mensajes entre contactos usando “candados” (clave pública), con identidad local y libreta de contactos.
 
@@ -23,3 +23,6 @@ Contenido cifrado con:
 - La **llave privada nunca se muestra en claro**.
 - Si ya existe una identidad y el backup trae otra, se pide confirmación fuerte para reemplazar.
 
+
+## Etapa 8G
+- Restaurado **qrcode-generator.js** completo (evita "La librería QR no cargó").
