@@ -2,10 +2,10 @@
   const SCREENS = ["encrypt","decrypt","contacts","profile"];
 
   // Build stamp (Etapa 8E): visible para diagnóstico anti-caché/SW
-  const BUILD_ID = "v0.2.11-20260210T1842Z";
+  const BUILD_ID = "v0.3.1-20260210T1904Z";
 
   // Service Worker versionado por archivo (Etapa 8F)
-  const SW_VERSIONED_FILE = "./sw-v0.2.11.js";
+  const SW_VERSIONED_FILE = "./sw-v0.3.1.js";
   const SW_BRIDGE_FILE = "./sw.js";
 
   // Mi QR — guardado (Etapa 1B)
@@ -71,6 +71,15 @@
     const h = (location.hash || "").trim();
     const m = h.match(/^#\/(encrypt|decrypt|contacts|profile)$/);
     return m ? m[1] : "encrypt";
+  }
+
+  function canonicalAppUrl(){
+    // SOLO: origin + pathname (sin params, sin hash, sin datos personales)
+    try{
+      return `${location.origin}${location.pathname}`;
+    }catch(_e){
+      return "";
+    }
   }
 
 
@@ -1583,6 +1592,8 @@
   const btnCopyLock = $("#btnCopyLock");
   const btnCopyFp = $("#btnCopyFingerprint");
   const btnShowMyQR = $("#btnShowMyQR");
+  const btnShareAppLink = $("#btnShareAppLink");
+  const btnCopyAppLink = $("#btnCopyAppLink");
 
   // Build stamps (Etapa 8E)
   const buildStampProfile = $("#buildStampProfile");
@@ -1690,6 +1701,35 @@
     }, 320);
   }
 
+  async function copyAppLink(){
+    const url = canonicalAppUrl();
+    if (!url){ toast("Enlace no disponible"); return; }
+    try{
+      await copyToClipboard(url);
+      toast("Enlace copiado ✅");
+    }catch(_e){
+      toast("No se pudo copiar");
+    }
+  }
+
+  async function shareAppLink(){
+    const url = canonicalAppUrl();
+    if (!url){ toast("Enlace no disponible"); return; }
+
+    if (navigator.share){
+      try{
+        await navigator.share({ title: "Sigilo A33", url });
+        toast("Compartido ✅");
+        return;
+      }catch(e){
+        // Si el usuario canceló, no hacemos nada.
+        if (e && e.name === "AbortError") return;
+        // En errores raros (iPad/PWA), caemos a copiar.
+      }
+    }
+    await copyAppLink();
+  }
+
   function bindProfileEvents(){
     const on = () => saveProfileDebounced();
     elName?.addEventListener("input", on);
@@ -1713,6 +1753,10 @@
         toast("No se pudo copiar huella");
       }
     });
+
+    // Compartir enlace (Etapa 6)
+    btnCopyAppLink?.addEventListener("click", () => { copyAppLink(); });
+    btnShareAppLink?.addEventListener("click", () => { shareAppLink(); });
 
     // Mi QR (Etapa 5)
     btnShowMyQR?.addEventListener("click", () => openMyQr());
