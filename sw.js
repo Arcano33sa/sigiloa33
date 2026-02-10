@@ -5,8 +5,8 @@
    - Fuerza 1 recarga con cache-bust (best-effort) para sacar al cliente del estado raro.
 */
 
-const BRIDGE_BUILD_ID = "v0.2.6-20260210T1553Z";
-const TARGET_SW = "./sw-v0.2.6.js";
+const BRIDGE_BUILD_ID = "v0.2.11-20260210T1842Z";
+const TARGET_SW = "./sw-v0.2.11.js";
 const CACHE_PREFIX = "sigilo-a33-";
 
 function postInfo(ev){

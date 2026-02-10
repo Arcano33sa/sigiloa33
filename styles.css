@@ -565,6 +565,52 @@ body{
   shape-rendering: crispEdges;
 }
 
+.qr-svg img.qr-img{
+  display:block;
+  width:100%;
+  height:100%;
+  max-width:100%;
+  max-height:100%;
+  object-fit: contain;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.qr-gen-row{
+  margin-top: 10px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap: 8px;
+  text-align:center;
+}
+
+.qr-stale-row{
+  margin-top: 10px;
+  display:flex;
+  align-items:center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.qr-badge-stale{
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 900;
+  border: 1px solid rgba(255, 77, 79, .55);
+  background: rgba(255, 77, 79, .12);
+  color: rgba(245,243,239,.95);
+}
+
+.qr-gen-msg{
+  font-size: 12px;
+  line-height: 1.35;
+  color: rgba(245,243,239,.78);
+}
+
 .qr-box canvas{
   display:block;
   width: auto;

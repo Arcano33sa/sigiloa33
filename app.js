@@ -2,11 +2,16 @@
   const SCREENS = ["encrypt","decrypt","contacts","profile"];
 
   // Build stamp (Etapa 8E): visible para diagnóstico anti-caché/SW
-  const BUILD_ID = "v0.2.6-20260210T1553Z";
+  const BUILD_ID = "v0.2.11-20260210T1842Z";
 
   // Service Worker versionado por archivo (Etapa 8F)
-  const SW_VERSIONED_FILE = "./sw-v0.2.6.js";
+  const SW_VERSIONED_FILE = "./sw-v0.2.11.js";
   const SW_BRIDGE_FILE = "./sw.js";
+
+  // Mi QR — guardado (Etapa 1B)
+  const SIGILOA33_QR_IDENTITY_SVG_V1 = "SIGILOA33_QR_IDENTITY_SVG_V1";
+  const SIGILOA33_QR_IDENTITY_PNG_V1 = "SIGILOA33_QR_IDENTITY_PNG_V1";
+  const SIGILOA33_QR_IDENTITY_META_V1 = "SIGILOA33_QR_IDENTITY_META_V1";
 
   // Sigilo A33 — Identidad local (Etapa 2)
   const DB_NAME = "sigilo-a33";
@@ -71,7 +76,7 @@
 
   // ---------- Diagnóstico SW (Etapa 8E) ----------
   const swYesNo = (v) => (v ? "sí" : "no");
-  let _swDiag = { supported:false, registered:false, active:false, controlling:false, state:"-", cache:"-", script:"-" };
+  let _swDiag = { supported:false, registered:false, active:false, controlling:false, state:"-", cache:"-", script:"-", build:"-" };
   let _myQrLastDiag = null;
 
   function swSnapshot(){
@@ -108,7 +113,7 @@
   }
 
   async function refreshSwDiag(){
-    const out = { supported:false, registered:false, active:false, controlling:false, state:"-", cache:"-", script:"-" };
+    const out = { supported:false, registered:false, active:false, controlling:false, state:"-", cache:"-", script:"-", build:"-" };
     if (!("serviceWorker" in navigator)){
       _swDiag = out;
       return out;
@@ -123,6 +128,12 @@
         out.registered = true;
         out.active = !!reg.active;
         out.state = String(reg.active?.state || reg.waiting?.state || reg.installing?.state || "-");
+
+        // Best-effort: obtener scriptURL aunque aún no esté "controlando".
+        const s0 = reg.active?.scriptURL || reg.waiting?.scriptURL || reg.installing?.scriptURL || "";
+        if (s0){
+          try{ out.script = new URL(String(s0), location.href).pathname.split("/").pop() || "-"; }catch(_e){ out.script = String(s0); }
+        }
       }
     }catch(_e){}
 
@@ -130,6 +141,8 @@
     if (info && typeof info === "object"){
       const c = info.cache || info.cacheName || info.CACHE || "";
       if (c) out.cache = String(c);
+      const b = info.build || info.BUILD_ID || info.BUILD || "";
+      if (b) out.build = String(b);
       const s = info.script || info.scriptURL || info.url || "";
       if (s){
         try{ out.script = new URL(String(s), location.href).pathname.split("/").pop() || "-"; }catch(_e){ out.script = String(s); }
@@ -151,10 +164,11 @@
   async function repairCacheRescue(){
     // No toca identidad/contactos (IndexedDB/localStorage).
     // Solo SW + Cache Storage.
+
     const online = (typeof navigator.onLine === "boolean") ? navigator.onLine : true;
     if (!online){
-      toast("Sin internet: conectate y reintenta");
-      return;
+      // Sin internet igual sirve para soltar SW/caches; la recarga puede depender de red.
+      toast("Sin internet: se limpiará caché, pero la recarga podría fallar");
     }
 
     const ok = confirm("Reparar caché y recargar? (no borra tu identidad ni contactos)");
@@ -914,6 +928,115 @@
     return buildSigiloQrPayload(obj);
   }
 
+  function lsGetSafe(key){
+    try{ return window.localStorage ? window.localStorage.getItem(key) : null; }catch(_e){ return null; }
+  }
+
+  function lsSetSafe(key, value){
+    try{ if (window.localStorage) window.localStorage.setItem(key, value); }catch(_e){ /* ignore */ }
+  }
+
+  function hash8(hex){
+    const h = String(hex || "").trim().toLowerCase().replace(/[^0-9a-f]/g, "");
+    return h ? h.slice(0, 8) : "-";
+  }
+
+
+  function parseQrMeta(){
+    const raw = lsGetSafe(SIGILOA33_QR_IDENTITY_META_V1);
+    if (!raw) return null;
+    try{
+      const j = JSON.parse(String(raw));
+      const ts = Number(j?.ts || 0) || 0;
+      const build = String(j?.build || "").trim();
+      const payloadLen = Number(j?.payloadLen || 0) || 0;
+      const payloadHash = String(j?.payloadHash || "").trim().toLowerCase();
+      const lastGenOk = (j && typeof j.lastGenOk === "boolean") ? j.lastGenOk : null;
+      const lastErrCode = String(j?.lastErrCode || "").trim();
+      return {
+        ts,
+        build: build || "-",
+        payloadLen,
+        payloadHash: payloadHash ? payloadHash.replace(/[^0-9a-f]/g, "") : "",
+        lastGenOk,
+        lastErrCode: lastErrCode || ""
+      };
+    }catch{ return null; }
+  }
+
+
+  // Guardar meta del QR (hash/len) junto con ts/build.
+  // Nota: NO genera QR; solo persiste meta cuando un flujo de guardado lo invoque.
+  async function saveMyQrMetaForPayload(payloadText, opts={}){
+    const t = String(payloadText || "");
+    const payloadLen = t.length;
+    let payloadHash = "";
+    try{ payloadHash = payloadLen ? await sha256Hex(t) : ""; }catch(_e){ payloadHash = ""; }
+
+    const ok = (opts && typeof opts.ok === "boolean") ? opts.ok : null;
+    const errCodeIn = String((opts && opts.errCode) ? opts.errCode : "").trim();
+
+    const prev = parseQrMeta();
+    const meta = {
+      ts: Number(prev?.ts || 0) || 0,
+      build: String(prev?.build || "-").trim() || "-",
+      payloadLen: Number(prev?.payloadLen || 0) || 0,
+      payloadHash: String(prev?.payloadHash || "").trim().toLowerCase().replace(/[^0-9a-f]/g, ""),
+      lastGenOk: (prev && typeof prev.lastGenOk === "boolean") ? prev.lastGenOk : null,
+      lastErrCode: String(prev?.lastErrCode || "").trim()
+    };
+
+    if (ok === false){
+      // NO tocar ts/build/payloadLen/payloadHash (mantener QR previo si existe)
+      meta.lastGenOk = false;
+      meta.lastErrCode = errCodeIn || "QR_GEN_FAIL_1";
+      if (!prev){
+        // Sin meta previa: al menos marcar build para diagnóstico.
+        meta.build = BUILD_ID;
+      }
+    }else{
+      // Éxito (o compat): actualizar sello y hash
+      meta.ts = Date.now();
+      meta.build = BUILD_ID;
+      meta.payloadLen = payloadLen;
+      meta.payloadHash = payloadHash;
+      if (ok === true){
+        meta.lastGenOk = true;
+        meta.lastErrCode = "";
+      }
+      if (ok === null){
+        // Compat: no tocar status fields si no se especifica ok
+        meta.lastGenOk = (prev && typeof prev.lastGenOk === "boolean") ? prev.lastGenOk : null;
+        meta.lastErrCode = String(prev?.lastErrCode || "").trim();
+      }
+    }
+
+    lsSetSafe(SIGILOA33_QR_IDENTITY_META_V1, JSON.stringify(meta));
+    return meta;
+  }
+
+  function fmtTs(ts){
+    const n = Number(ts || 0) || 0;
+    if (!n) return "-";
+    const d = new Date(n);
+    if (isNaN(d.getTime())) return "-";
+    const pad = (x) => String(x).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+
+  function readSavedMyQr(){
+    const svgRaw = String(lsGetSafe(SIGILOA33_QR_IDENTITY_SVG_V1) || "").trim();
+    const pngRaw = String(lsGetSafe(SIGILOA33_QR_IDENTITY_PNG_V1) || "").trim();
+    const meta = parseQrMeta();
+
+    const svgOk = !!(svgRaw && /<svg[\s>]/i.test(svgRaw));
+    const pngOk = !!(pngRaw && /^data:image\/png/i.test(pngRaw));
+
+    if (svgOk) return { ok:true, kind:"svg", data: svgRaw, meta };
+    if (pngOk) return { ok:true, kind:"png", data: pngRaw, meta };
+    return { ok:false, kind:"-", data:"", meta };
+  }
+
   function buildQrInstance(text, ecLevel){
     const level = (ecLevel || SIGILO_QR_EC_LEVEL_FALLBACK);
     const qr = qrcode(0, level); // typeNumber auto
@@ -957,6 +1080,14 @@
     }
   }
 
+  function setMyQrStaleUI(stale){
+    if (!myQrStaleRow) return;
+    myQrStaleRow.hidden = !stale;
+    if (myQrStaleBadge){
+      myQrStaleBadge.textContent = stale ? "QR desactualizado" : "";
+    }
+  }
+
   function setMyQrDetailsInfo(info){
     if (!myQrDetails || !myQrDetailsBody) return;
     const lines = Array.isArray(info) ? info : [];
@@ -975,13 +1106,57 @@
     if (myQrCanvas) myQrCanvas.hidden = true;
   }
 
+  function setMyQrNoSavedPlaceholder(){
+    if (!myQrSvg) return;
+    myQrSvg.hidden = false;
+    myQrSvg.innerHTML = `
+      <div class="qr-placeholder">
+        <div class="qr-ph-title">Aún no has generado tu QR</div>
+      </div>`;
+    if (myQrCanvas) myQrCanvas.hidden = true;
+  }
+
+  function renderMyQrFromSaved(){
+    const saved = readSavedMyQr();
+    if (myQrGenRow) myQrGenRow.hidden = !!saved.ok;
+
+    if (saved.ok){
+      clearMyQrPlaceholder();
+      if (myQrSvg){
+        myQrSvg.hidden = false;
+        if (saved.kind === "svg"){
+          myQrSvg.innerHTML = saved.data;
+        }else{
+          myQrSvg.innerHTML = "";
+          const img = document.createElement("img");
+          img.className = "qr-img";
+          img.alt = "Mi QR";
+          img.src = saved.data;
+          myQrSvg.appendChild(img);
+        }
+      }
+      if (myQrCanvas) myQrCanvas.hidden = true;
+      setMyQrStatusMsg(true);
+      setMyQrWarnMsg("", false);
+    }else{
+      setMyQrStatusMsg(false);
+      setMyQrWarnMsg("", false);
+      setMyQrNoSavedPlaceholder();
+    }
+    return saved;
+  }
+
   function clearMyQrPlaceholder(){
     if (myQrSvg) myQrSvg.innerHTML = "";
   }
 
   function composeMyQrDetailsLines(diag){
     const d = diag || {};
-    const len = Number(d.len || 0) || 0;
+    const payloadLen = Number(d.payloadLen || d.len || 0) || 0;
+    const payloadHash = String(d.payloadHash || "").trim();
+    const savedPayloadLen = Number(d.savedPayloadLen || 0) || 0;
+    const savedPayloadHash = String(d.savedPayloadHash || "").trim();
+    const stale = !!d.stale;
     const libOk = !!d.libOk;
     const attempted = Array.isArray(d.attempted) ? d.attempted : [];
     const usedRenderer = String(d.usedRenderer || "-");
@@ -994,12 +1169,24 @@
       : "SW: no soportado";
     const swCache = sw.supported ? `SW cache: ${String(sw.cache || "-")}` : "";
 
+    const qrSaved = !!d.qrSaved;
+    const qrTs = Number(d.qrTs || 0) || 0;
+
     const out = [
       `Build: ${BUILD_ID}`,
-      `Len: ${len}`,
-      `Lib: ${libOk ? "OK" : "NO"}`,
+      `QR guardado: ${qrSaved ? "sí" : "no"}`,
+      `QR ts: ${qrTs ? fmtTs(qrTs) : "-"}`,
+      `payloadLen: ${payloadLen}`,
+      `payloadHash: ${hash8(payloadHash)}`,
+      `savedLen: ${savedPayloadLen || "-"}`,
+      `savedHash: ${hash8(savedPayloadHash)}`,
+      `stale: ${stale ? "Sí" : "No"}`,
+      `Lib: ${libOk ? "OK" : "NO"}` ,
+      `Gen: ${d.genOk === true ? "OK" : (d.genOk === false ? "FAIL" : "-")}` ,
+      `ErrCode: ${String(d.errCode || "-") || "-"}` ,
       swLine,
       swCache,
+      (sw.supported && sw.build && sw.build !== "-" ? `SW build: ${sw.build}` : ""),
       (sw.supported && sw.script && sw.script !== "-" ? `SW file: ${sw.script}` : ""),
       `Renderer: ${attempted.join(" → ") || "-"}`,
       `Usado: ${usedRenderer || "-"}`,
@@ -1406,6 +1593,12 @@
   const myQrSvg = $("#myQrSvg");
   const myQrCanvas = $("#myQrCanvas");
   const myQrText = $("#myQrText");
+  const myQrTextWrap = $("#myQrTextWrap");
+  const myQrGenRow = $("#myQrGenRow");
+  const btnGenerateMyQr = $("#btnGenerateMyQr");
+  const myQrStaleRow = $("#myQrStaleRow");
+  const myQrStaleBadge = $("#myQrStaleBadge");
+  const btnUpdateMyQr = $("#btnUpdateMyQr");
   const myQrStatus = $("#myQrStatus");
   const myQrWarn = $("#myQrWarn");
   const myQrErr = $("#myQrErr");
@@ -1544,6 +1737,14 @@
       toast("Candado copiado");
     });
 
+    btnGenerateMyQr?.addEventListener("click", () => {
+      scheduleGenerateMyQr();
+    });
+
+    btnUpdateMyQr?.addEventListener("click", () => {
+      scheduleGenerateMyQr();
+    });
+
     // Salida de emergencia (Etapa 8F)
     btnRepairCache?.addEventListener("click", () => {
       try{ repairCacheRescue(); }catch(_e){ location.reload(); }
@@ -1560,20 +1761,15 @@
 
   function openMyQr(){
     const t = buildMyQrText();
-    if (!t){
-      toast("Identidad no lista");
-      return;
-    }
-    if (myQrText) myQrText.value = t;
+    if (myQrText) myQrText.value = t || "";
 
     // Reset QR modal UI
     setHintError(myQrErr, "");
     setMyQrStatusMsg(false);
     setMyQrWarnMsg("", false);
+    setMyQrStaleUI(false);
     if (myQrDetails) myQrDetails.open = false;
     setMyQrDetailsInfo([]);
-    if (myQrSvg){ myQrSvg.hidden = false; myQrSvg.innerHTML = ""; }
-    if (myQrCanvas) myQrCanvas.hidden = true;
 
     // Diagnóstico visible (build + SW)
     renderBuildStamps();
@@ -1595,115 +1791,192 @@
 
   function scheduleMyQrRender(){
     if (!myQrModal || myQrModal.hidden) return;
-    const t = (myQrText?.value || "").trim();
-    if (!t) return;
 
-    const warnLong = t.length > SIGILO_QR_WARN_THRESHOLD;
-
-    // Reset UI (no consola)
+    // Reset UI (sin consola)
     setHintError(myQrErr, "");
-    setMyQrStatusMsg(false);
     setMyQrWarnMsg("", false);
+    setMyQrStaleUI(false);
     if (myQrDetails) myQrDetails.open = false;
     setMyQrDetailsInfo([]);
-    clearMyQrPlaceholder();
-    if (myQrCanvas) myQrCanvas.hidden = true;
 
-    // Diagnóstico visible aunque el render tarde o falle
     swSnapshot();
-    _myQrLastDiag = { len: t.length, libOk: isQrLibOk(), attempted: [], usedRenderer: "-", ecUsed: "-", errMsg: "" };
-    updateMyQrDiagUI();
 
     if (_myQrRaf) cancelAnimationFrame(_myQrRaf);
     _myQrRaf = requestAnimationFrame(() => {
       _myQrRaf = 0;
-      // 2 frames to guarantee modal visible before rendering (iPad Safari)
-      requestAnimationFrame(() => {
+
+      (async () => {
+        // Render SOLO desde guardado (Etapa 1B)
+        const saved = renderMyQrFromSaved();
+
+        const t = (myQrText?.value || "").trim();
         const libOk = isQrLibOk();
-        const attempted = [];
-        let usedRenderer = "";
-        let ecUsed = null;
-        let lastErr = null;
 
-        // Try SVG first
-        let ok = false;
-        if (myQrSvg){
-          myQrSvg.hidden = false;
-          attempted.push("SVG");
-          const resSvg = renderQrToSvgInline(t, myQrSvg);
-          ok = !!resSvg?.ok;
-          if (ok){
-            usedRenderer = "SVG";
-            ecUsed = resSvg.ec || null;
-          }else{
-            lastErr = resSvg?.err || null;
-          }
-        }
+        // Hash del payload actual (Etapa 2A)
+        let payloadHash = "";
+        try{ payloadHash = t ? await sha256Hex(t) : ""; }catch(_e){ payloadHash = ""; }
 
-        // Fallback canvas
-        if (!ok){
-          if (myQrCanvas){
-            attempted.push("canvas");
-            myQrCanvas.hidden = false;
-            const resC = renderQrToCanvas(t, myQrCanvas);
-            ok = !!resC?.ok;
-            if (ok){
-              usedRenderer = "canvas";
-              ecUsed = resC.ec || null;
-              if (myQrSvg) myQrSvg.hidden = true;
-            }else{
-              lastErr = resC?.err || lastErr;
-            }
-          }
-        }
+        const sm = saved && saved.meta ? saved.meta : null;
+        const savedPayloadLen = Number(sm?.payloadLen || 0) || 0;
+        const savedPayloadHash = String(sm?.payloadHash || "").trim().toLowerCase().replace(/[^0-9a-f]/g, "");
 
-        if (ok){
-          setMyQrStatusMsg(true);
-          setMyQrWarnMsg(warnLong ? "QR largo: si no escanea, usa Copiar texto QR" : "", false);
-          _myQrLastDiag = {
-            len: t.length,
-            libOk,
-            attempted,
-            usedRenderer: usedRenderer || "-",
-            ecUsed: ecUsed || "-",
-            errMsg: ""
-          };
-          updateMyQrDiagUI();
-          return;
-        }
+        // Determinar si el QR guardado corresponde a la identidad actual:
+        // - Preferir hash de payload (Etapa 2A)
+        // - Fallback: si no hay hash guardado, usar updatedAt vs ts (más seguro que asumir).
+        const metaTs = Number(sm?.ts || 0) || 0;
+        const idUpdatedAt = Number(_identity?.updatedAt || 0) || 0;
+        const hashMismatch = !!(savedPayloadHash && payloadHash && savedPayloadHash !== payloadHash);
+        const tsMismatch = !!(!savedPayloadHash && metaTs && idUpdatedAt && idUpdatedAt > metaTs);
+        const unknownNoMeta = !!(!savedPayloadHash && !metaTs);
+        const stale = !!saved.ok && (hashMismatch || tsMismatch || unknownNoMeta);
 
-        // Determine exact cause A/B/C
-        let cause = "C";
-        if (!libOk) cause = "A";
-        else{
-          const e0 = lastErr;
-          const eL = e0 && e0.__sigilo_qr ? e0.__sigilo_qr.errL : null;
-          const eM = e0 && e0.__sigilo_qr ? e0.__sigilo_qr.errM : null;
-          if (isQrCapacityError(e0) || isQrCapacityError(eL) || isQrCapacityError(eM)){
-            cause = "B";
-          }else if (!e0){
-            cause = "";
-          }
-        }
+        // UI
+        setMyQrStaleUI(!!saved.ok && stale);
+        setMyQrStatusMsg(!!saved.ok && !stale);
 
-        const msg = cause ? qrCauseLabel(cause) : "No se pudo renderizar el QR. Intenta Copiar texto QR.";
-        setMyQrStatusMsg(false);
-        setMyQrWarnMsg(msg, true);
-        setMyQrPlaceholder(cause || "C");
-
-        // Minimal tech details (colapsable)
-        const errMsg = lastErr ? String(lastErr.message || lastErr).trim() : "-";
         _myQrLastDiag = {
-          len: t.length,
+          payloadLen: t.length,
+          payloadHash,
+          savedPayloadLen,
+          savedPayloadHash,
+          stale,
           libOk,
-          attempted,
-          usedRenderer: usedRenderer || "-",
-          ecUsed: ecUsed || "-",
-          errMsg
+          genOk: (sm && typeof sm.lastGenOk === 'boolean') ? sm.lastGenOk : null,
+          errCode: (sm && sm.lastErrCode) ? String(sm.lastErrCode) : '',
+          attempted: (saved.ok ? [`saved:${saved.kind}`] : []),
+          usedRenderer: (saved.ok ? `saved:${saved.kind}` : "-"),
+          ecUsed: "-",
+          errMsg: "",
+          qrSaved: !!saved.ok,
+          qrTs: Number(sm?.ts || 0) || 0
         };
-        updateMyQrDiagUI();
-      });
+        updateMyQrDiagUI(true);
+      })();
     });
+  }
+
+  // ---------- Mi QR actions (Etapa 2B) ----------
+  let _myQrGenBusy = false;
+
+  function setMyQrGenBusy(on){
+    _myQrGenBusy = !!on;
+    const dis = _myQrGenBusy;
+    try{
+      if (btnGenerateMyQr){
+        if (dis) btnGenerateMyQr.setAttribute("disabled","disabled");
+        else btnGenerateMyQr.removeAttribute("disabled");
+      }
+      if (btnUpdateMyQr){
+        if (dis) btnUpdateMyQr.setAttribute("disabled","disabled");
+        else btnUpdateMyQr.removeAttribute("disabled");
+      }
+    }catch(_e){}
+  }
+
+  function myQrFailUi(code, errCode, hadSaved){
+    const cause = qrCauseLabel(code) || "C) Error interno al renderizar";
+    const msg = `${cause} (${errCode})`;
+    if (!hadSaved){
+      setMyQrPlaceholder(code);
+    }
+    setMyQrStatusMsg(false);
+    setMyQrWarnMsg(msg, true);
+    try{ if (myQrDetails) myQrDetails.open = true; }catch(_e){}
+  }
+
+  function scheduleGenerateMyQr(){
+    if (_myQrGenBusy) return;
+    if (!myQrModal || myQrModal.hidden) return;
+    setMyQrGenBusy(true);
+
+    // Timing robusto iPad: modal abierto → rAF → setTimeout(50) → generar
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        generateMyQrNow().finally(() => setMyQrGenBusy(false));
+      }, 50);
+    });
+  }
+
+  async function generateMyQrNow(){
+    const t = (myQrText?.value || buildMyQrText() || "").trim();
+    if (myQrText) myQrText.value = t || "";
+
+    setHintError(myQrErr, "");
+    setMyQrWarnMsg("", false);
+
+    const prevSaved = readSavedMyQr();
+    const hadSaved = !!prevSaved.ok;
+
+    const libOk = isQrLibOk();
+    if (!libOk){
+      await saveMyQrMetaForPayload(t, { ok:false, errCode:"QR_LIB_MISSING" });
+      if (hadSaved){
+        scheduleMyQrRender();
+        setTimeout(() => {
+          myQrFailUi("A", "QR_LIB_MISSING", true);
+          if (_myQrLastDiag){ _myQrLastDiag.genOk = false; _myQrLastDiag.errCode = "QR_LIB_MISSING"; _myQrLastDiag.libOk = false; }
+          updateMyQrDiagUI(true);
+        }, 80);
+      }else{
+        myQrFailUi("A", "QR_LIB_MISSING", false);
+        if (_myQrLastDiag){ _myQrLastDiag.genOk = false; _myQrLastDiag.errCode = "QR_LIB_MISSING"; _myQrLastDiag.libOk = false; }
+        updateMyQrDiagUI(true);
+      }
+      return;
+    }
+
+    // Generar SVG
+    let svgStr = "";
+    try{
+      const pack = pickBestQrDiag(t);
+      const qr = pack.qr;
+      const cellSize = 4;
+      const margin = cellSize * 4;
+      svgStr = qr.createSvgTag({ cellSize, margin, scalable:true, alt:"Mi QR" });
+      if (!svgStr || !/<svg[\s>]/i.test(svgStr)) throw new Error("SVG_EMPTY");
+
+      // Guardado seguro: no perder QR previo si falla
+      const prevSvg = String(lsGetSafe(SIGILOA33_QR_IDENTITY_SVG_V1) || "");
+      const prevPng = String(lsGetSafe(SIGILOA33_QR_IDENTITY_PNG_V1) || "");
+
+      lsSetSafe(SIGILOA33_QR_IDENTITY_SVG_V1, svgStr);
+      const back = String(lsGetSafe(SIGILOA33_QR_IDENTITY_SVG_V1) || "");
+      if (back.trim() !== svgStr.trim()){
+        // Revertir
+        lsSetSafe(SIGILOA33_QR_IDENTITY_SVG_V1, prevSvg);
+        lsSetSafe(SIGILOA33_QR_IDENTITY_PNG_V1, prevPng);
+        throw new Error("SAVE_FAIL");
+      }
+
+      // Preferir SVG: limpiar PNG legacy
+      lsSetSafe(SIGILOA33_QR_IDENTITY_PNG_V1, "");
+
+    }catch(e){
+      const tooLong = isQrCapacityError(e);
+      const code = tooLong ? "B" : "C";
+      const errCode = tooLong ? "QR_TEXT_TOO_LONG" : "QR_GEN_FAIL_1";
+
+      await saveMyQrMetaForPayload(t, { ok:false, errCode });
+
+      if (hadSaved){
+        scheduleMyQrRender();
+        setTimeout(() => {
+          myQrFailUi(code, errCode, true);
+          if (_myQrLastDiag){ _myQrLastDiag.genOk = false; _myQrLastDiag.errCode = errCode; _myQrLastDiag.errMsg = String(e?.message || e || ""); }
+          updateMyQrDiagUI(true);
+        }, 90);
+      }else{
+        myQrFailUi(code, errCode, false);
+        if (_myQrLastDiag){ _myQrLastDiag.genOk = false; _myQrLastDiag.errCode = errCode; _myQrLastDiag.errMsg = String(e?.message || e || ""); }
+        updateMyQrDiagUI(true);
+      }
+      return;
+    }
+
+    // Meta: solo después de guardado correcto
+    await saveMyQrMetaForPayload(t, { ok:true, errCode:"" });
+    toast("QR guardado");
+    scheduleMyQrRender();
   }
 
   // ---------- Backup UI actions (Etapa 8) ----------
@@ -1832,8 +2105,7 @@ Contactos: ${n}`;
 
       const text = await buildBackupText(plain, p1);
       setBackupExportText(text);
-
-      // descarga
+      // bajar archivo
       downloadText(`SigiloA33_backup_${fileStamp()}.txt`, text);
       toast("Backup exportado");
     }catch(e){
@@ -2740,13 +3012,18 @@ Contactos: ${n}`;
   })();
 
   // PWA: register SW (safe no-op if not supported)
-  if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => {
+  function registerSwBestEffort(){
+    if (!('serviceWorker' in navigator)) return;
+    try{
       navigator.serviceWorker.register(SW_VERSIONED_FILE)
         .then(() => { try{ refreshSwDiag(); }catch(_e){} })
         .catch(() => { try{ navigator.serviceWorker.register(SW_BRIDGE_FILE).catch(() => {}); }catch(_e){} });
-    });
+    }catch(_e){}
   }
+
+  // Registrar lo antes posible (mejor para iPad/PWA post “Reparar caché”)
+  registerSwBestEffort();
+  window.addEventListener('load', () => { try{ registerSwBestEffort(); }catch(_e){} });
 
     // Puente: si un SW viejo te avisa que está en modo rescate, re-registra el SW versionado.
     try{
