@@ -149,21 +149,37 @@
         </div>
 
         <div class="card">
-          <div class="row between">
-            <div>
-              <div class="card-title">Mi QR</div>
-              <div class="muted">Comparte tu candado en formato QR (sin cámara por ahora).</div>
-            </div>
-            <button id="btnShowMyQR" class="btn" type="button">Mostrar QR</button>
+          <div class="card-title">Compartir enlace</div>
+          <div class="muted">Comparte la app por enlace.</div>
+          <div class="btnrow" style="margin-top:10px;">
+            <button id="btnShareAppLink" class="btn" type="button">Compartir enlace</button>
+            <button id="btnCopyAppLink" class="btn" type="button">Copiar enlace</button>
           </div>
         </div>
 
         <div class="card">
-          <div class="card-title">Compartir enlace</div>
-          <div class="muted">Comparte la app por enlace (sin QR).</div>
+          <div class="card-title">Enlace de identidad</div>
+          <div class="muted">Comparte un enlace que abre Contactos y pre-llena “Agregar contacto”.</div>
           <div class="btnrow" style="margin-top:10px;">
-            <button id="btnShareAppLink" class="btn" type="button">Compartir enlace</button>
-            <button id="btnCopyAppLink" class="btn" type="button">Copiar enlace</button>
+            <button id="btnShareIdentityLink" class="btn" type="button">Compartir enlace de identidad</button>
+            <button id="btnCopyIdentityLink" class="btn" type="button">Copiar enlace de identidad</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Código de identidad</div>
+          <div class="muted">Comparte tu identidad por texto (sin enlaces, sin códigos 2D).</div>
+          <textarea id="profileIdentityCode" class="textarea mono" rows="3" readonly placeholder="SIGILOA33:IDENTITY:1:..."></textarea>
+          <div class="btnrow" style="margin-top:10px;">
+            <button id="btnCopyIdentityCode" class="btn" type="button">Copiar código</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Soporte</div>
+          <div class="hint hint-compact">Si notas comportamientos raros tras una actualización, usa este botón para limpiar caché y recargar.</div>
+          <div class="btnrow" style="margin-top:10px;">
+            <button id="btnRepairCache" class="btn danger" type="button">Reparar caché</button>
           </div>
         </div>
 
@@ -242,6 +258,16 @@
         </div>
         <div class="modal-body">
           <div class="grid">
+            <div class="full">
+              <label class="label" for="contactIdentity">Pegar identidad</label>
+              <textarea id="contactIdentity" class="textarea mono" rows="3" placeholder="SIGILOA33:IDENTITY:1:... (o enlace #/i/...)"></textarea>
+              <div class="btnrow" style="margin-top:10px;">
+                <button id="btnApplyIdentity" class="btn" type="button">Aplicar</button>
+                <button id="btnClearIdentity" class="btn" type="button">Limpiar</button>
+              </div>
+              <div id="contactIdentityErr" class="hint hint-compact danger" hidden></div>
+              <div class="hint hint-compact">Pegar aquí solo pre-llena; no guarda hasta que toques <b>Guardar</b>.</div>
+            </div>
             <div>
               <label class="label" for="contactName">Nombre</label>
               <input id="contactName" class="input" type="text" placeholder="Nombre" autocomplete="off" />
@@ -255,56 +281,21 @@
               <input id="contactAlias" class="input" type="text" placeholder="@ana" autocomplete="off" />
             </div>
             <div class="full">
-              <label class="label" for="contactQrText">Pegar texto QR</label>
-              <textarea id="contactQrText" class="textarea" rows="3" placeholder="SIGILOA33:1:..."></textarea>
-              <div class="btnline">
-                <button id="btnScanContactQR" class="btn" type="button">Escanear QR</button>
-              </div>
-              <div id="contactQrError" class="hint hint-compact danger" hidden></div>
-              <div class="detectbox" aria-label="Detectado">
-                <div class="detectrow"><span class="k">Alias detectado</span><span id="contactDetectedAlias" class="mono">—</span></div>
-                <div class="detectrow"><span class="k">Huella detectada</span><span id="contactDetectedHuella" class="mono">—</span></div>
-              </div>
+              <label class="label" for="contactLock">Pegar candado público</label>
+              <textarea id="contactLock" class="textarea" rows="6" placeholder="Pega aquí el candado público…"></textarea>
+              <div class="hint hint-compact">Se calcula la huella automáticamente.</div>
 
-              <label class="checkrow" for="contactVerified">
+              <label class="checkrow" for="contactVerified" style="margin-top:10px;">
                 <input id="contactVerified" type="checkbox" />
                 <span>Marcar como verificado</span>
               </label>
               <div class="hint hint-compact">Confirma la huella con la otra persona.</div>
-              <div class="hint hint-compact">Si pegas un QR válido, se rellena el formulario automáticamente.</div>
-            </div>
-            <div class="full">
-              <label class="label" for="contactLock">Pegar candado público</label>
-              <textarea id="contactLock" class="textarea" rows="6" placeholder="Pega aquí el candado público…"></textarea>
-              <div class="hint hint-compact">Se calcula la huella automáticamente.</div>
             </div>
           </div>
         </div>
         <div class="modal-actions">
           <button id="btnCancelContact" class="btn" type="button">Cancelar</button>
           <button id="btnSaveContact" class="btn primary" type="button">Guardar</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Modal: Escanear QR (Etapa 6) -->
-    <div id="scanQrModal" class="modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="scanQrModalTitle">
-      <div class="modal-backdrop" data-close="1"></div>
-      <div class="modal-card">
-        <div class="modal-head">
-          <div id="scanQrModalTitle" class="modal-title">Escanear QR</div>
-          <button id="btnCloseScanQrModal" class="iconbtn" type="button" aria-label="Cerrar">✕</button>
-        </div>
-        <div class="modal-body">
-          <div class="scanwrap">
-            <video id="scanQrVideo" class="scanvideo" autoplay playsinline muted></video>
-          </div>
-          <div id="scanQrError" class="hint hint-compact danger" hidden></div>
-          <div class="hint hint-compact">Apunta la cámara al QR de la otra persona.</div>
-        </div>
-        <div class="modal-actions">
-          <button id="btnScanQrPaste" class="btn" type="button">Pegar texto QR</button>
-          <button id="btnScanQrCancel" class="btn" type="button">Cancelar</button>
         </div>
       </div>
     </div>
@@ -327,56 +318,6 @@
         </div>
       </div>
     </div>
-
-
-    <!-- Modal: Mi QR (Etapa 5) -->
-    <div id="myQrModal" class="modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="myQrModalTitle">
-      <div class="modal-backdrop" data-close="1"></div>
-      <div class="modal-card">
-        <div class="modal-head">
-          <div id="myQrModalTitle" class="modal-title">Mi QR</div>
-          <button id="btnCloseMyQrModal" class="iconbtn" type="button" aria-label="Cerrar">✕</button>
-        </div>
-        <div class="modal-body">
-          <div class="qr-wrap">
-            <div class="qr-box">
-              <div id="myQrSvg" class="qr-svg" aria-label="Mi QR"></div>
-              <canvas id="myQrCanvas" width="1" height="1" aria-label="Mi QR" hidden></canvas>
-            </div>
-          </div>
-
-          <div id="myQrStaleRow" class="qr-stale-row" hidden>
-            <div id="myQrStaleBadge" class="qr-badge-stale">QR desactualizado</div>
-            <button id="btnUpdateMyQr" class="btn" type="button">Actualizar QR</button>
-          </div>
-
-          <div id="myQrGenRow" class="qr-gen-row" hidden>
-            <button id="btnGenerateMyQr" class="btn" type="button">Generar mi QR</button>
-          </div>
-
-          <div id="myQrStatus" class="qr-status" hidden>✓ Listo para escanear</div>
-          <div id="myQrWarn" class="qr-warn" hidden>QR largo: si no escanea, usa Copiar texto QR</div>
-          <div id="myQrBuildStamp" class="build-stamp build-stamp-qr" aria-label="Build ID"></div>
-          <details id="myQrDetails" class="qr-details">
-            <summary>Detalles</summary>
-            <div id="myQrDetailsBody" class="qr-details-body"></div>
-          </details>
-          <div id="myQrErr" class="hint hint-compact danger" hidden></div>
-
-          <div id="myQrTextWrap" class="full" style="margin-top:12px;">
-            <label class="label" for="myQrText">Texto QR</label>
-            <textarea id="myQrText" class="textarea mono" rows="3" readonly></textarea>
-            <div class="hint hint-compact">Pégalo en <b>Contactos</b> → <b>Agregar</b> → <b>Pegar texto QR</b>.</div>
-          </div>
-        </div>
-        <div class="modal-actions">
-          <button id="btnRepairCache" class="btn danger" type="button">Reparar caché</button>
-          <button id="btnCopyMyQrText" class="btn" type="button">Copiar texto QR</button>
-          <button id="btnCopyMyCandado" class="btn" type="button">Copiar candado</button>
-        </div>
-      </div>
-    </div>
-
     <!-- Modal: Reemplazar identidad (Etapa 8) -->
     <div id="replaceIdentityModal" class="modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="replaceIdentityTitle">
       <div class="modal-backdrop" data-close="1"></div>
@@ -399,7 +340,6 @@
         </div>
       </div>
     </div>
-  <script src="./qrcode-generator.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>

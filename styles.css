@@ -198,10 +198,13 @@ body{
   color: rgba(245,243,239,.70);
 }
 
+.hint.danger{ color: var(--danger); }
+.hint-compact.danger{ color: var(--danger); }
+
 .hint-compact.ok{ color: var(--gold2); }
 .pwa-help{ white-space: pre-line; }
 
-/* Contactos: QR scan + verificación (Etapa 6) */
+/* Contactos: verificación */
 .btnline{
   display:flex;
   gap: 10px;
@@ -234,20 +237,6 @@ body{
 .checkrow input{
   width: 18px;
   height: 18px;
-}
-
-.scanwrap{
-  width: 100%;
-  border-radius: 18px;
-  overflow:hidden;
-  border: 1px solid rgba(255,255,255,.10);
-  background: rgba(0,0,0,.25);
-}
-.scanvideo{
-  width: 100%;
-  height: 240px;
-  object-fit: cover;
-  display:block;
 }
 
 /* Badges */
@@ -504,218 +493,11 @@ body{
   .main{ padding-left: 18px; padding-right: 18px; }
 }
 
-/* Etapa 5: QR */
-.hint.danger{ color: var(--danger); }
-.hint-compact.danger{ color: var(--danger); }
-
-#myQrModal .modal-body,
-#myQrModal .modal-card{
-  overflow-x: hidden;
-}
-
-#appShareModal .modal-body,
-#appShareModal .modal-card{
-  overflow-x: hidden;
-}
-
-#appShareModal .modal-body,
-#appShareModal .modal-card{
-  overflow-x: hidden;
-}
-
-.qr-wrap{
-  display:flex;
-  justify-content:center;
-  align-items:center;
-  width: 100%;
-  margin: 4px 0 0;
-}
-
-.qr-box{
-  width: min(360px, 92vw, 100%);
-  max-width: 100%;
-  aspect-ratio: 1 / 1;
-  margin: 0 auto;
-  padding: 14px;
-  border-radius: 16px;
-  border: 1px solid rgba(0,0,0,.12);
-  background: #fff;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-}
-
-.qr-svg{
-  width:100%;
-  height:100%;
-  aspect-ratio: 1 / 1;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  background:#fff;
-}
-
-.qr-box svg,
-.qr-svg svg{
-  display:block;
-  width:100%;
-  height:100%;
-  max-width:100%;
-  max-height:100%;
-  shape-rendering: crispEdges;
-}
-
-.qr-svg img.qr-img{
-  display:block;
-  width:100%;
-  height:100%;
-  max-width:100%;
-  max-height:100%;
-  object-fit: contain;
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
-}
-
-.qr-gen-row{
-  margin-top: 10px;
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  justify-content:center;
-  gap: 8px;
-  text-align:center;
-}
-
-.qr-stale-row{
-  margin-top: 10px;
-  display:flex;
-  align-items:center;
-  justify-content: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.qr-badge-stale{
-  border-radius: 999px;
-  padding: 6px 10px;
-  font-size: 12px;
-  font-weight: 900;
-  border: 1px solid rgba(255, 77, 79, .55);
-  background: rgba(255, 77, 79, .12);
-  color: rgba(245,243,239,.95);
-}
-
-.qr-gen-msg{
-  font-size: 12px;
-  line-height: 1.35;
-  color: rgba(245,243,239,.78);
-}
-
-.qr-box canvas{
-  display:block;
-  width: auto;
-  height: auto;
-  max-width:100%;
-  max-height:100%;
-  background:#fff;
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
-}
-
-.qr-status,
-.qr-warn{
-  margin-top: 10px;
-  border-radius: 12px;
-  padding: 8px 10px;
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-
-
-.qr-warn.danger{
-  border: 1px solid rgba(255, 77, 79, .55);
-  background: rgba(255, 77, 79, .12);
-  color: rgba(245,243,239,.95);
-}
-
-.qr-details{
-  margin-top: 10px;
-  border-radius: 12px;
-  padding: 8px 10px;
-  font-size: 11px;
-  line-height: 1.35;
-  border: 1px solid rgba(255,255,255,.14);
-  background: rgba(255,255,255,.03);
-  color: rgba(245,243,239,.78);
-}
-
-.qr-details > summary{
-  cursor: pointer;
-  font-weight: 700;
-  list-style: none;
-}
-
-.qr-details > summary::-webkit-details-marker{
-  display:none;
-}
-
-.qr-details-body{
-  margin-top: 6px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-.qr-placeholder{
-  width: 100%;
-  height: 100%;
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  justify-content:center;
-  text-align:center;
-  gap: 6px;
-  padding: 10px;
-  background: #fff;
-  color: rgba(0,0,0,.78);
-  border-radius: 12px;
-}
-
-.qr-ph-title{
-  font-weight: 900;
-  font-size: 14px;
-  letter-spacing: .2px;
-}
-
-.qr-ph-cause{
-  font-size: 12px;
-  line-height: 1.3;
-  color: rgba(0,0,0,.68);
-}
-
-.qr-status{
-  border: 1px solid rgba(202,165,106,.45);
-  background: rgba(202,165,106,.12);
-  color: rgba(245,243,239,.95);
-  font-weight: 800;
-}
-
-.qr-warn{
-  border: 1px dashed rgba(255,255,255,.22);
-  background: rgba(255,255,255,.05);
-  color: rgba(245,243,239,.78);
-}
-
 .build-stamp{
   margin-top: 8px;
   font-size: 12px;
   line-height: 1.2;
   color: rgba(245,243,239,.6);
   word-break: break-word;
-}
-
-.build-stamp-qr{
-  margin-top: 8px;
 }
 

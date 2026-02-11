@@ -2,16 +2,10 @@
   const SCREENS = ["encrypt","decrypt","contacts","profile"];
 
   // Build stamp (Etapa 8E): visible para diagnóstico anti-caché/SW
-  const BUILD_ID = "v0.3.3-20260211T1331Z";
-
+  const BUILD_ID = "v0.3.4-20260211T2013Z";
   // Service Worker versionado por archivo (Etapa 8F)
-  const SW_VERSIONED_FILE = "./sw-v0.3.3.js";
+  const SW_VERSIONED_FILE = "./sw-v0.3.4.js";
   const SW_BRIDGE_FILE = "./sw.js";
-
-  // Mi QR — guardado (Etapa 1B)
-  const SIGILOA33_QR_IDENTITY_SVG_V1 = "SIGILOA33_QR_IDENTITY_SVG_V1";
-  const SIGILOA33_QR_IDENTITY_PNG_V1 = "SIGILOA33_QR_IDENTITY_PNG_V1";
-  const SIGILOA33_QR_IDENTITY_META_V1 = "SIGILOA33_QR_IDENTITY_META_V1";
 
   // Sigilo A33 — Identidad local (Etapa 2)
   const DB_NAME = "sigilo-a33";
@@ -67,10 +61,24 @@
     if (location.hash !== newHash) history.replaceState(null, "", newHash);
   }
 
+  // Etapa 7I/2: Import identidad por enlace
+  let _pendingIdentityImportB64 = ""; // base64url json
+  let _pendingIdentityImportDone = false;
+
   function parseRoute(){
     const h = (location.hash || "").trim();
-    const m = h.match(/^#\/(encrypt|decrypt|contacts|profile)$/);
-    return m ? m[1] : "encrypt";
+    let m = h.match(/^#\/(encrypt|decrypt|contacts|profile)$/);
+    if (m) return m[1];
+
+    // Link de identidad: #/i/<payloadB64Url>
+    m = h.match(/^#\/i\/([A-Za-z0-9_-]+)$/);
+    if (m){
+      _pendingIdentityImportB64 = m[1];
+      _pendingIdentityImportDone = false;
+      return "contacts";
+    }
+
+    return "encrypt";
   }
 
   function canonicalAppUrl(){
@@ -86,8 +94,6 @@
   // ---------- Diagnóstico SW (Etapa 8E) ----------
   const swYesNo = (v) => (v ? "sí" : "no");
   let _swDiag = { supported:false, registered:false, active:false, controlling:false, state:"-", cache:"-", script:"-", build:"-" };
-  let _myQrLastDiag = null;
-
   function swSnapshot(){
     const supported = ("serviceWorker" in navigator);
     const controlling = supported ? !!navigator.serviceWorker.controller : false;
@@ -157,12 +163,7 @@
         try{ out.script = new URL(String(s), location.href).pathname.split("/").pop() || "-"; }catch(_e){ out.script = String(s); }
       }
     }
-
     _swDiag = out;
-    // Si el modal está abierto, refrescar Detalles sin depender de consola.
-    if (typeof updateMyQrDiagUI === "function"){
-      try{ updateMyQrDiagUI(true); }catch(_e){}
-    }
     return out;
   }
 
@@ -838,13 +839,7 @@
     const text = new TextDecoder().decode(new Uint8Array(plainBuf));
     return { text, fromFingerprint: fromFp || null };
   }
-
-  // ---------- QR (Etapa 5) ----------
-  const SIGILO_QR_PREFIX = "SIGILOA33";
-  const SIGILO_QR_VERSION = 1;
-  // Error correction: we auto-pick between L and M to reduce density while keeping scan reliability.
-  const SIGILO_QR_EC_LEVEL_FALLBACK = "M";
-  const SIGILO_QR_WARN_THRESHOLD = 350; // chars
+  // ---------- Base64URL helpers ----------
 
   function base64UrlEncodeBytes(bytes){
     let bin = "";
@@ -873,525 +868,7 @@
     return JSON.parse(json);
   }
 
-  function buildSigiloQrPayload(obj){
-    return `${SIGILO_QR_PREFIX}:${SIGILO_QR_VERSION}:${base64UrlEncodeJson(obj)}`;
-  }
 
-  async function parseSigiloQrPayload(text){
-    const raw = String(text || "").trim();
-    const re = new RegExp(`^${SIGILO_QR_PREFIX}:(\\d+):([A-Za-z0-9_-]+)$`);
-    const m = raw.match(re);
-    if (!m) throw new Error("Formato QR inválido. Debe ser SIGILOA33:1:<base64url-json>");
-    const ver = Number(m[1]);
-    if (ver !== SIGILO_QR_VERSION) throw new Error(`Versión QR no soportada (${m[1]}).`);
-
-    let obj;
-    try{
-      obj = base64UrlDecodeJson(m[2]);
-    }catch{
-      throw new Error("QR corrupto: no se pudo decodificar.");
-    }
-
-    if (!obj || typeof obj !== "object" || Array.isArray(obj))
-      throw new Error("QR inválido: JSON no es un objeto.");
-
-    const allowed = new Set(["candadoPublico","alias","huella","nombre","apellidos"]);
-    for (const k of Object.keys(obj)){
-      if (!allowed.has(k)) throw new Error("QR inválido: contiene campos desconocidos.");
-    }
-
-    const candadoPublico = String(obj.candadoPublico || "").trim();
-    const huella = String(obj.huella || "").trim().toLowerCase();
-    if (!candadoPublico) throw new Error("QR inválido: falta candadoPublico.");
-    if (!/^[0-9a-f]{64}$/.test(huella)) throw new Error("QR inválido: huella no válida.");
-
-    const alias = (typeof obj.alias === "string") ? normalizeAlias(obj.alias) : "";
-    const nombre = (typeof obj.nombre === "string") ? obj.nombre.trim() : "";
-    const apellidos = (typeof obj.apellidos === "string") ? obj.apellidos.trim() : "";
-
-    const candadoObj = parseJsonMaybe(candadoPublico);
-    if (!candadoObj || !candadoObj.pub) throw new Error("QR inválido: candadoPublico no es JSON válido.");
-
-    const schemaOk = (candadoObj.t === "sigilo-a33-candado-v1" && candadoObj.alg === "RSA-OAEP-256");
-    if (!schemaOk) throw new Error("QR inválido: candadoPublico no es de Sigilo A33.");
-
-    const fpHex = await sha256Hex(stableStringify(candadoObj.pub));
-    if (fpHex !== huella) throw new Error("QR inválido: huella no coincide con el candado.");
-
-    return { candadoPublico, huella, alias, nombre, apellidos };
-  }
-
-  function buildMyQrText(){
-    if (!_identity) return "";
-    const p = _identity.profile || { name:"", last:"", alias:"" };
-    const obj = {
-      candadoPublico: candadoPayload(),
-      huella: _identity?.fingerprint?.hex || ""
-    };
-    const a = normalizeAlias(p.alias || "");
-    if (a) obj.alias = a;
-    const n = (p.name || "").trim();
-    const l = (p.last || "").trim();
-    if (n) obj.nombre = n;
-    if (l) obj.apellidos = l;
-    return buildSigiloQrPayload(obj);
-  }
-
-  function lsGetSafe(key){
-    try{ return window.localStorage ? window.localStorage.getItem(key) : null; }catch(_e){ return null; }
-  }
-
-  function lsSetSafe(key, value){
-    try{ if (window.localStorage) window.localStorage.setItem(key, value); }catch(_e){ /* ignore */ }
-  }
-
-  function hash8(hex){
-    const h = String(hex || "").trim().toLowerCase().replace(/[^0-9a-f]/g, "");
-    return h ? h.slice(0, 8) : "-";
-  }
-
-
-  function parseQrMeta(){
-    const raw = lsGetSafe(SIGILOA33_QR_IDENTITY_META_V1);
-    if (!raw) return null;
-    try{
-      const j = JSON.parse(String(raw));
-      const ts = Number(j?.ts || 0) || 0;
-      const build = String(j?.build || "").trim();
-      const payloadLen = Number(j?.payloadLen || 0) || 0;
-      const payloadHash = String(j?.payloadHash || "").trim().toLowerCase();
-      const lastGenOk = (j && typeof j.lastGenOk === "boolean") ? j.lastGenOk : null;
-      const lastErrCode = String(j?.lastErrCode || "").trim();
-      return {
-        ts,
-        build: build || "-",
-        payloadLen,
-        payloadHash: payloadHash ? payloadHash.replace(/[^0-9a-f]/g, "") : "",
-        lastGenOk,
-        lastErrCode: lastErrCode || ""
-      };
-    }catch{ return null; }
-  }
-
-
-  // Guardar meta del QR (hash/len) junto con ts/build.
-  // Nota: NO genera QR; solo persiste meta cuando un flujo de guardado lo invoque.
-  async function saveMyQrMetaForPayload(payloadText, opts={}){
-    const t = String(payloadText || "");
-    const payloadLen = t.length;
-    let payloadHash = "";
-    try{ payloadHash = payloadLen ? await sha256Hex(t) : ""; }catch(_e){ payloadHash = ""; }
-
-    const ok = (opts && typeof opts.ok === "boolean") ? opts.ok : null;
-    const errCodeIn = String((opts && opts.errCode) ? opts.errCode : "").trim();
-
-    const prev = parseQrMeta();
-    const meta = {
-      ts: Number(prev?.ts || 0) || 0,
-      build: String(prev?.build || "-").trim() || "-",
-      payloadLen: Number(prev?.payloadLen || 0) || 0,
-      payloadHash: String(prev?.payloadHash || "").trim().toLowerCase().replace(/[^0-9a-f]/g, ""),
-      lastGenOk: (prev && typeof prev.lastGenOk === "boolean") ? prev.lastGenOk : null,
-      lastErrCode: String(prev?.lastErrCode || "").trim()
-    };
-
-    if (ok === false){
-      // NO tocar ts/build/payloadLen/payloadHash (mantener QR previo si existe)
-      meta.lastGenOk = false;
-      meta.lastErrCode = errCodeIn || "QR_GEN_FAIL_1";
-      if (!prev){
-        // Sin meta previa: al menos marcar build para diagnóstico.
-        meta.build = BUILD_ID;
-      }
-    }else{
-      // Éxito (o compat): actualizar sello y hash
-      meta.ts = Date.now();
-      meta.build = BUILD_ID;
-      meta.payloadLen = payloadLen;
-      meta.payloadHash = payloadHash;
-      if (ok === true){
-        meta.lastGenOk = true;
-        meta.lastErrCode = "";
-      }
-      if (ok === null){
-        // Compat: no tocar status fields si no se especifica ok
-        meta.lastGenOk = (prev && typeof prev.lastGenOk === "boolean") ? prev.lastGenOk : null;
-        meta.lastErrCode = String(prev?.lastErrCode || "").trim();
-      }
-    }
-
-    lsSetSafe(SIGILOA33_QR_IDENTITY_META_V1, JSON.stringify(meta));
-    return meta;
-  }
-
-  function fmtTs(ts){
-    const n = Number(ts || 0) || 0;
-    if (!n) return "-";
-    const d = new Date(n);
-    if (isNaN(d.getTime())) return "-";
-    const pad = (x) => String(x).padStart(2, "0");
-    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-  }
-
-  function readSavedMyQr(){
-    const svgRaw = String(lsGetSafe(SIGILOA33_QR_IDENTITY_SVG_V1) || "").trim();
-    const pngRaw = String(lsGetSafe(SIGILOA33_QR_IDENTITY_PNG_V1) || "").trim();
-    const meta = parseQrMeta();
-
-    const svgOk = !!(svgRaw && /<svg[\s>]/i.test(svgRaw));
-    const pngOk = !!(pngRaw && /^data:image\/png/i.test(pngRaw));
-
-    if (svgOk) return { ok:true, kind:"svg", data: svgRaw, meta };
-    if (pngOk) return { ok:true, kind:"png", data: pngRaw, meta };
-    return { ok:false, kind:"-", data:"", meta };
-  }
-
-  function buildQrInstance(text, ecLevel){
-    const level = (ecLevel || SIGILO_QR_EC_LEVEL_FALLBACK);
-
-    // El payload DEBE ser string (no null/undefined). Si está vacío, no renderizar.
-    if (text === null || typeof text === 'undefined'){
-      const e = new Error('QR_PAYLOAD_EMPTY');
-      try{ e.__sigilo_errCode = 'QR_PAYLOAD_EMPTY'; }catch(_e){}
-      throw e;
-    }
-    const t = String(text).trim();
-    if (!t){
-      const e = new Error('QR_PAYLOAD_EMPTY');
-      try{ e.__sigilo_errCode = 'QR_PAYLOAD_EMPTY'; }catch(_e){}
-      throw e;
-    }
-
-    // qrcode-generator NO soporta typeNumber=0 (auto).
-    // Estrategia determinística: probar 1..40 y elegir el más pequeño que haga make() sin excepción.
-    let lastErr = null;
-    let capErrs = 0;
-    for (let typeNumber = 1; typeNumber <= 40; typeNumber++){
-      try{
-        const qr = qrcode(typeNumber, level);
-        qr.addData(t);
-        qr.make();
-        return qr;
-      }catch(e){
-        lastErr = e;
-        const msg = (e && e.message) ? String(e.message) : String(e || '');
-        if (/overflow|too long|data too long|code length|QR_TEXT_TOO_LONG/i.test(msg)) capErrs++;
-      }
-    }
-
-    // Si falló TODO, diferenciar "demasiado largo" vs error interno.
-    if (capErrs >= 40){
-      const e = new Error('QR_TEXT_TOO_LONG');
-      try{ e.__sigilo_errCode = 'QR_TEXT_TOO_LONG'; }catch(_e){}
-      throw e;
-    }
-
-    throw (lastErr || new Error('QR make failed'));
-  }
-
-  function isQrLibOk(){
-    return (typeof qrcode === "function");
-  }
-
-  function isQrCapacityError(err){
-    const msg = (err && err.message) ? String(err.message) : String(err || "");
-    return /overflow|too long|data too long|code length|QR_TEXT_TOO_LONG/i.test(msg);
-  }
-
-  function qrCauseLabel(code){
-    if (code === "A") return "A) Librería QR no cargó (probable caché/SW viejo)";
-    if (code === "B") return "B) Texto QR demasiado largo para QR";
-    if (code === "C") return "C) Error interno al renderizar";
-    if (code === "D") return "D) Payload vacío";
-    return "";
-  }
-
-  function setMyQrWarnMsg(msg, danger){
-    if (!myQrWarn) return;
-    const m = String(msg || "").trim();
-    myQrWarn.textContent = m;
-    myQrWarn.hidden = !m;
-    if (danger) myQrWarn.classList.add("danger");
-    else myQrWarn.classList.remove("danger");
-  }
-
-  function setMyQrStatusMsg(ok){
-    if (!myQrStatus) return;
-    if (ok){
-      myQrStatus.textContent = "✓ Listo para escanear";
-      myQrStatus.hidden = false;
-    }else{
-      myQrStatus.hidden = true;
-    }
-  }
-
-  function setMyQrStaleUI(stale){
-    if (!myQrStaleRow) return;
-    myQrStaleRow.hidden = !stale;
-    if (myQrStaleBadge){
-      myQrStaleBadge.textContent = stale ? "QR desactualizado" : "";
-    }
-  }
-
-  function setMyQrDetailsInfo(info){
-    if (!myQrDetails || !myQrDetailsBody) return;
-    const lines = Array.isArray(info) ? info : [];
-    myQrDetailsBody.textContent = lines.filter(Boolean).join("\n");
-  }
-
-  function setMyQrPlaceholder(code){
-    if (!myQrSvg) return;
-    const cause = qrCauseLabel(code);
-    myQrSvg.hidden = false;
-    myQrSvg.innerHTML = `
-      <div class="qr-placeholder">
-        <div class="qr-ph-title">QR no disponible</div>
-        <div class="qr-ph-cause">${cause || ""}</div>
-      </div>`;
-    if (myQrCanvas) myQrCanvas.hidden = true;
-  }
-
-  function setMyQrNoSavedPlaceholder(){
-    if (!myQrSvg) return;
-    myQrSvg.hidden = false;
-    myQrSvg.innerHTML = `
-      <div class="qr-placeholder">
-        <div class="qr-ph-title">Aún no has generado tu QR</div>
-      </div>`;
-    if (myQrCanvas) myQrCanvas.hidden = true;
-  }
-
-  function renderMyQrFromSaved(){
-    const saved = readSavedMyQr();
-    if (myQrGenRow) myQrGenRow.hidden = !!saved.ok;
-
-    if (saved.ok){
-      clearMyQrPlaceholder();
-      if (myQrSvg){
-        myQrSvg.hidden = false;
-        if (saved.kind === "svg"){
-          myQrSvg.innerHTML = saved.data;
-        }else{
-          myQrSvg.innerHTML = "";
-          const img = document.createElement("img");
-          img.className = "qr-img";
-          img.alt = "Mi QR";
-          img.src = saved.data;
-          myQrSvg.appendChild(img);
-        }
-      }
-      if (myQrCanvas) myQrCanvas.hidden = true;
-      setMyQrStatusMsg(true);
-      setMyQrWarnMsg("", false);
-    }else{
-      setMyQrStatusMsg(false);
-      setMyQrWarnMsg("", false);
-      setMyQrNoSavedPlaceholder();
-    }
-    return saved;
-  }
-
-  function clearMyQrPlaceholder(){
-    if (myQrSvg) myQrSvg.innerHTML = "";
-  }
-
-  function composeMyQrDetailsLines(diag){
-    const d = diag || {};
-    const payloadLen = Number(d.payloadLen || d.len || 0) || 0;
-    const payloadHash = String(d.payloadHash || "").trim();
-    const savedPayloadLen = Number(d.savedPayloadLen || 0) || 0;
-    const savedPayloadHash = String(d.savedPayloadHash || "").trim();
-    const stale = !!d.stale;
-    const libOk = !!d.libOk;
-    const attempted = Array.isArray(d.attempted) ? d.attempted : [];
-    const usedRenderer = String(d.usedRenderer || "-");
-    const ecUsed = String(d.ecUsed || "-");
-    const errMsg = String(d.errMsg || "").trim();
-
-    const sw = _swDiag || swSnapshot();
-    const swLine = sw.supported
-      ? `SW: reg ${swYesNo(sw.registered)} | activo ${swYesNo(sw.active)} | controlando ${swYesNo(sw.controlling)}${sw.state && sw.state !== "-" ? ` | ${sw.state}` : ""}`
-      : "SW: no soportado";
-    const swCache = sw.supported ? `SW cache: ${String(sw.cache || "-")}` : "";
-
-    const qrSaved = !!d.qrSaved;
-    const qrTs = Number(d.qrTs || 0) || 0;
-
-    const out = [
-      `Build: ${BUILD_ID}`,
-      `QR guardado: ${qrSaved ? "sí" : "no"}`,
-      `QR ts: ${qrTs ? fmtTs(qrTs) : "-"}`,
-      `payloadLen: ${payloadLen}`,
-      `payloadHash: ${hash8(payloadHash)}`,
-      `savedLen: ${savedPayloadLen || "-"}`,
-      `savedHash: ${hash8(savedPayloadHash)}`,
-      `stale: ${stale ? "Sí" : "No"}`,
-      `Lib: ${libOk ? "OK" : "NO"}` ,
-      `Gen: ${d.genOk === true ? "OK" : (d.genOk === false ? "FAIL" : "-")}` ,
-      `ErrCode: ${String(d.errCode || "-") || "-"}` ,
-      swLine,
-      swCache,
-      (sw.supported && sw.build && sw.build !== "-" ? `SW build: ${sw.build}` : ""),
-      (sw.supported && sw.script && sw.script !== "-" ? `SW file: ${sw.script}` : ""),
-      `Renderer: ${attempted.join(" → ") || "-"}`,
-      `Usado: ${usedRenderer || "-"}`,
-      `EC: ${ecUsed || "-"}`,
-    ];
-    if (errMsg) out.push(`Err: ${errMsg}`);
-    return out.filter(Boolean);
-  }
-
-  function updateMyQrDiagUI(force){
-    if (!myQrModal || myQrModal.hidden) return;
-    if (force) renderBuildStamps();
-    if (!_myQrLastDiag) return;
-    setMyQrDetailsInfo(composeMyQrDetailsLines(_myQrLastDiag));
-  }
-
-
-
-  function pickBestQrDiag(text){
-    const t = String(text || "").trim();
-    let qrL = null, qrM = null;
-    let errL = null, errM = null;
-    try{ qrL = buildQrInstance(t, "L"); }catch(e){ errL = e; qrL = null; }
-    try{ qrM = buildQrInstance(t, "M"); }catch(e){ errM = e; qrM = null; }
-
-    if (qrL && qrM){
-      const nL = qrL.getModuleCount();
-      const nM = qrM.getModuleCount();
-      if (nL < nM) return { qr: qrL, ec: "L", errL, errM };
-      if (nM < nL) return { qr: qrM, ec: "M", errL, errM };
-      return { qr: qrM, ec: "M", errL, errM };
-    }
-    if (qrM) return { qr: qrM, ec: "M", errL, errM };
-    if (qrL) return { qr: qrL, ec: "L", errL, errM };
-
-    const err = errM || errL || new Error("QR make failed");
-    try{ err.__sigilo_qr = { errL, errM }; }catch(_e){}
-    throw err;
-  }
-
-  // Pick between L and M. Choose the one that yields fewer modules (less dense).
-  // If tie, prefer M for a bit more resilience.
-  function pickBestQr(text){
-    const t = String(text || "").trim();
-    let qrL = null;
-    let qrM = null;
-    try{ qrL = buildQrInstance(t, "L"); }catch(e){ qrL = null; }
-    try{ qrM = buildQrInstance(t, "M"); }catch(e){ qrM = null; }
-
-    if (qrL && qrM){
-      const nL = qrL.getModuleCount();
-      const nM = qrM.getModuleCount();
-      if (nL < nM) return { qr: qrL, ec: "L" };
-      if (nM < nL) return { qr: qrM, ec: "M" };
-      return { qr: qrM, ec: "M" };
-    }
-    if (qrM) return { qr: qrM, ec: "M" };
-    if (qrL) return { qr: qrL, ec: "L" };
-
-    // last resort
-    const qr = buildQrInstance(t, SIGILO_QR_EC_LEVEL_FALLBACK);
-    return { qr, ec: SIGILO_QR_EC_LEVEL_FALLBACK };
-  }
-
-  function renderQrToCanvas(text, canvas){
-    if (!canvas) return { ok:false, ec:null, err:new Error("NO_CANVAS") };
-
-    if (!isQrLibOk()){
-      return { ok:false, ec:null, err:new Error("QR_LIB_MISSING") };
-    }
-
-    const t = String(text || "").trim();
-    if (!t){
-      const ctx0 = canvas.getContext("2d");
-      canvas.width = 1; canvas.height = 1;
-      ctx0 && ctx0.clearRect(0,0,1,1);
-      return { ok:true, ec:null, err:null };
-    }
-
-    let qrPack;
-    try{
-      qrPack = pickBestQrDiag(t);
-    }catch(e){
-      return { ok:false, ec:null, err:e };
-    }
-
-    const qr = qrPack.qr;
-    const count = qr.getModuleCount();
-    const quiet = 4; // modules
-    const totalModules = count + quiet * 2;
-
-    // Compute an on-screen size that fits the qr-box without CSS stretching.
-    const box = canvas.closest?.(".qr-box") || canvas.parentElement;
-    let targetCss = 320;
-    try{
-      if (box){
-        const rect = box.getBoundingClientRect();
-        targetCss = Number(rect?.width || targetCss) || targetCss;
-        const cs = window.getComputedStyle ? getComputedStyle(box) : null;
-        const padL = cs ? parseFloat(cs.paddingLeft) || 0 : 0;
-        const padR = cs ? parseFloat(cs.paddingRight) || 0 : 0;
-        targetCss = targetCss - padL - padR;
-      }
-    }catch(e){ /* ignore */ }
-    targetCss = Math.max(160, Math.min(420, targetCss || 320));
-
-    const dpr = Math.max(1, Number(window.devicePixelRatio || 1));
-    const modulePx = Math.max(1, Math.floor((targetCss * dpr) / totalModules));
-    const sizePx = modulePx * totalModules;
-
-    canvas.width = sizePx;
-    canvas.height = sizePx;
-
-    const cssSize = sizePx / dpr;
-    const cssPx = (Math.round(cssSize * 100) / 100).toString();
-    canvas.style.width = cssPx + "px";
-    canvas.style.height = cssPx + "px";
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return { ok:false, ec:qrPack.ec, err:new Error("NO_CTX") };
-    ctx.imageSmoothingEnabled = false;
-
-    // White background (real #fff) + black modules (#000)
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, sizePx, sizePx);
-
-    ctx.fillStyle = "#000000";
-    for (let r=0; r<count; r++){
-      const y = (r + quiet) * modulePx;
-      for (let c=0; c<count; c++){
-        if (qr.isDark(r, c)){
-          ctx.fillRect((c + quiet) * modulePx, y, modulePx, modulePx);
-        }
-      }
-    }
-
-    return { ok:true, ec:qrPack.ec, err:null };
-  }
-
-  function renderQrToSvgInline(text, mountEl, altText){
-    if (!mountEl) return { ok:false, ec:null, err:new Error("NO_MOUNT") };
-    if (!isQrLibOk()) return { ok:false, ec:null, err:new Error("QR_LIB_MISSING") };
-
-    const t = String(text || "").trim();
-    if (!t){
-      mountEl.innerHTML = "";
-      return { ok:true, ec:null, err:null };
-    }
-
-    try{
-      const { qr, ec } = pickBestQrDiag(t);
-      const cellSize = 4;
-      const margin = cellSize * 4; // quiet zone = 4 modules
-      mountEl.innerHTML = qr.createSvgTag(cellSize, margin);
-      return { ok:true, ec, err:null };
-    }catch(e){
-      mountEl.innerHTML = "";
-      return { ok:false, ec:null, err:e };
-    }
-  }
 
 
   // ---------- Backup/Restore (Etapa 8) ----------
@@ -1627,32 +1104,15 @@
   const elErrTxt = $("#identityErrorText");
   const btnCopyLock = $("#btnCopyLock");
   const btnCopyFp = $("#btnCopyFingerprint");
-  const btnShowMyQR = $("#btnShowMyQR");
   const btnShareAppLink = $("#btnShareAppLink");
   const btnCopyAppLink = $("#btnCopyAppLink");
+  const btnShareIdentityLink = $("#btnShareIdentityLink");
+  const btnCopyIdentityLink = $("#btnCopyIdentityLink");
+  const elIdentityCode = $("#profileIdentityCode");
+  const btnCopyIdentityCode = $("#btnCopyIdentityCode");
 
   // Build stamps (Etapa 8E)
   const buildStampProfile = $("#buildStampProfile");
-  const myQrBuildStamp = $("#myQrBuildStamp");
-
-  const myQrModal = $("#myQrModal");
-  const btnCloseMyQrModal = $("#btnCloseMyQrModal");
-  const myQrSvg = $("#myQrSvg");
-  const myQrCanvas = $("#myQrCanvas");
-  const myQrText = $("#myQrText");
-  const myQrTextWrap = $("#myQrTextWrap");
-  const myQrGenRow = $("#myQrGenRow");
-  const btnGenerateMyQr = $("#btnGenerateMyQr");
-  const myQrStaleRow = $("#myQrStaleRow");
-  const myQrStaleBadge = $("#myQrStaleBadge");
-  const btnUpdateMyQr = $("#btnUpdateMyQr");
-  const myQrStatus = $("#myQrStatus");
-  const myQrWarn = $("#myQrWarn");
-  const myQrErr = $("#myQrErr");
-  const myQrDetails = $("#myQrDetails");
-  const myQrDetailsBody = $("#myQrDetailsBody");
-  const btnCopyMyQrText = $("#btnCopyMyQrText");
-  const btnCopyMyCandado = $("#btnCopyMyCandado");
   const btnRepairCache = $("#btnRepairCache");
 
   // Backup UI (Etapa 8)
@@ -1682,11 +1142,9 @@
   let _backupLastExportText = "";
   let _pendingBackup = null;
   let _importBusy = false;
-
   function renderBuildStamps(){
     const txt = `Build: ${BUILD_ID}`;
     if (buildStampProfile) buildStampProfile.textContent = txt;
-    if (myQrBuildStamp) myQrBuildStamp.textContent = txt;
   }
 
   // Siempre visible, incluso antes de cargar identidad.
@@ -1715,6 +1173,12 @@
     if (elLockPrev){
       elLockPrev.textContent = candadoPreview(lockStr);
       elLockPrev.classList.toggle("empty", !lockStr);
+    }
+
+    const code = buildIdentityCode();
+    if (elIdentityCode){
+      elIdentityCode.value = code ? identityCodeForDisplay(code) : "";
+      elIdentityCode.classList.toggle("empty", !code);
     }
   }
 
@@ -1766,6 +1230,115 @@
     await copyAppLink();
   }
 
+  // Etapa 7I/3: Identidad por CÓDIGO (texto) — sin enlaces
+  const SIGILO_IDENTITY_CODE_PREFIX = "SIGILOA33:IDENTITY";
+  const SIGILO_IDENTITY_CODE_VERSION = 1;
+
+  function identityCodePayloadObj(){
+    if (!_identity) return null;
+    const p = _identity.profile || { name:"", last:"", alias:"" };
+    const lock = candadoPayload();
+    if (!lock) return null;
+    return {
+      t: "sigilo-a33-identity-code-v1",
+      v: 1,
+      p: {
+        name: String(p.name||"").trim(),
+        last: String(p.last||"").trim(),
+        alias: normalizeAlias(p.alias||"")
+      },
+      lock
+    };
+  }
+
+  function buildIdentityCode(){
+    const payload = identityCodePayloadObj();
+    if (!payload) return "";
+    const b64 = base64UrlEncodeJson(payload);
+    return `${SIGILO_IDENTITY_CODE_PREFIX}:${SIGILO_IDENTITY_CODE_VERSION}:${b64}`;
+  }
+
+  function wrapLongLine(str, every=64){
+    const s = String(str || "");
+    if (!s) return "";
+    let out = "";
+    for (let i=0;i<s.length;i+=every){
+      out += s.slice(i, i+every) + (i+every < s.length ? "\n" : "");
+    }
+    return out;
+  }
+
+  function identityCodeForDisplay(code){
+    const flat = String(code || "").trim();
+    const m = flat.match(/^SIGILOA33:IDENTITY:(\d+):([A-Za-z0-9_-]+)$/);
+    if (!m) return flat;
+    return `SIGILOA33:IDENTITY:${m[1]}:\n${wrapLongLine(m[2], 64)}`;
+  }
+
+  async function copyIdentityCode(){
+    const code = buildIdentityCode();
+    if (!code){ toast("Identidad no lista"); return; }
+    try{
+      await copyToClipboard(code);
+      toast("Código copiado ✅");
+    }catch(_e){
+      toast("No se pudo copiar");
+    }
+  }
+
+
+  // Identidad por enlace (Etapa 7I/2)
+  function identityLinkPayloadObj(){
+    if (!_identity) return null;
+    const p = _identity.profile || { name:"", last:"", alias:"" };
+    const lock = candadoPayload();
+    if (!lock) return null;
+    return {
+      t: "sigilo-a33-identity-link-v1",
+      v: 1,
+      p: {
+        name: String(p.name||"").trim(),
+        last: String(p.last||"").trim(),
+        alias: normalizeAlias(p.alias||"")
+      },
+      lock
+    };
+  }
+
+  function buildIdentityLink(){
+    const payload = identityLinkPayloadObj();
+    if (!payload) return "";
+    const b64 = base64UrlEncodeJson(payload);
+    const baseUrl = canonicalAppUrl();
+    if (!baseUrl) return "";
+    return `${baseUrl}#/i/${b64}`;
+  }
+
+  async function copyIdentityLink(){
+    const link = buildIdentityLink();
+    if (!link){ toast("Identidad no lista"); return; }
+    try{
+      await copyToClipboard(link);
+      toast("Enlace de identidad copiado ✅");
+    }catch(_e){
+      toast("No se pudo copiar");
+    }
+  }
+
+  async function shareIdentityLink(){
+    const link = buildIdentityLink();
+    if (!link){ toast("Identidad no lista"); return; }
+    if (navigator.share){
+      try{
+        await navigator.share({ title: "Sigilo A33 — Identidad", url: link, text: link });
+        toast("Compartido ✅");
+        return;
+      }catch(e){
+        if (e && e.name === "AbortError") return;
+      }
+    }
+    await copyIdentityLink();
+  }
   function bindProfileEvents(){
     const on = () => saveProfileDebounced();
     elName?.addEventListener("input", on);
@@ -1794,343 +1367,20 @@
     btnCopyAppLink?.addEventListener("click", () => { copyAppLink(); });
     btnShareAppLink?.addEventListener("click", () => { shareAppLink(); });
 
-    // Mi QR (Etapa 5)
-    btnShowMyQR?.addEventListener("click", () => openMyQr());
+    // Identidad por enlace (Etapa 7I/2)
+    btnCopyIdentityLink?.addEventListener("click", () => { copyIdentityLink(); });
+    btnShareIdentityLink?.addEventListener("click", () => { shareIdentityLink(); });
 
-    btnCloseMyQrModal?.addEventListener("click", closeMyQr);
-    myQrModal?.addEventListener("click", (ev) => {
-      const t = ev.target;
-      if (t && t.dataset && t.dataset.close) closeMyQr();
-    });
-
-    btnCopyMyQrText?.addEventListener("click", async () => {
-      const t = (myQrText?.value || "").trim();
-      if (!t){ toast("QR vacío"); return; }
-      await copyToClipboard(t);
-      toast("Texto QR copiado");
-    });
-
-    btnCopyMyCandado?.addEventListener("click", async () => {
-      const t = candadoPayload();
-      if (!t){ toast("Candado vacío"); return; }
-      await copyToClipboard(t);
-      toast("Candado copiado");
-    });
-
-    btnGenerateMyQr?.addEventListener("click", () => {
-      scheduleGenerateMyQr();
-    });
-
-    btnUpdateMyQr?.addEventListener("click", () => {
-      scheduleGenerateMyQr();
-    });
+    // Identidad por código (Etapa 7I/3)
+    btnCopyIdentityCode?.addEventListener("click", () => { copyIdentityCode(); });
 
     // Salida de emergencia (Etapa 8F)
     btnRepairCache?.addEventListener("click", () => {
       try{ repairCacheRescue(); }catch(_e){ location.reload(); }
     });
 
-    // Rotación / resize: mantener el QR visible
-    window.addEventListener("resize", () => {
-      if (myQrModal && !myQrModal.hidden){
-        clearTimeout(_myQrResizeTimer);
-        _myQrResizeTimer = setTimeout(scheduleMyQrRender, 120);
-      }
-    });
   }
 
-  function openMyQr(){
-    const t = buildMyQrText();
-    if (myQrText) myQrText.value = t || "";
-
-    // Reset QR modal UI
-    setHintError(myQrErr, "");
-    setMyQrStatusMsg(false);
-    setMyQrWarnMsg("", false);
-    setMyQrStaleUI(false);
-    if (myQrDetails) myQrDetails.open = false;
-    setMyQrDetailsInfo([]);
-
-    // Diagnóstico visible (build + SW)
-    renderBuildStamps();
-    swSnapshot();
-    refreshSwDiag();
-
-    openModal(myQrModal);
-    scheduleMyQrRender();
-  }
-
-  function closeMyQr(){
-    if (_myQrRaf) cancelAnimationFrame(_myQrRaf);
-    _myQrRaf = 0;
-    closeModal(myQrModal);
-  }
-
-  let _myQrRaf = 0;
-  let _myQrResizeTimer = null;
-
-  function scheduleMyQrRender(){
-    if (!myQrModal || myQrModal.hidden) return;
-
-    // Reset UI (sin consola)
-    setHintError(myQrErr, "");
-    setMyQrWarnMsg("", false);
-    setMyQrStaleUI(false);
-    if (myQrDetails) myQrDetails.open = false;
-    setMyQrDetailsInfo([]);
-
-    swSnapshot();
-
-    if (_myQrRaf) cancelAnimationFrame(_myQrRaf);
-    _myQrRaf = requestAnimationFrame(() => {
-      _myQrRaf = 0;
-
-      (async () => {
-        // Render SOLO desde guardado (Etapa 1B)
-        const saved = renderMyQrFromSaved();
-
-        const t = (myQrText?.value || "").trim();
-        const libOk = isQrLibOk();
-
-        // Hash del payload actual (Etapa 2A)
-        let payloadHash = "";
-        try{ payloadHash = t ? await sha256Hex(t) : ""; }catch(_e){ payloadHash = ""; }
-
-        const sm = saved && saved.meta ? saved.meta : null;
-        const savedPayloadLen = Number(sm?.payloadLen || 0) || 0;
-        const savedPayloadHash = String(sm?.payloadHash || "").trim().toLowerCase().replace(/[^0-9a-f]/g, "");
-
-        // Determinar si el QR guardado corresponde a la identidad actual:
-        // - Preferir hash de payload (Etapa 2A)
-        // - Fallback: si no hay hash guardado, usar updatedAt vs ts (más seguro que asumir).
-        const metaTs = Number(sm?.ts || 0) || 0;
-        const idUpdatedAt = Number(_identity?.updatedAt || 0) || 0;
-        const hashMismatch = !!(savedPayloadHash && payloadHash && savedPayloadHash !== payloadHash);
-        const tsMismatch = !!(!savedPayloadHash && metaTs && idUpdatedAt && idUpdatedAt > metaTs);
-        const unknownNoMeta = !!(!savedPayloadHash && !metaTs);
-        const stale = !!saved.ok && (hashMismatch || tsMismatch || unknownNoMeta);
-
-        // UI
-        setMyQrStaleUI(!!saved.ok && stale);
-        setMyQrStatusMsg(!!saved.ok && !stale);
-
-        _myQrLastDiag = {
-          payloadLen: t.length,
-          payloadHash,
-          savedPayloadLen,
-          savedPayloadHash,
-          stale,
-          libOk,
-          genOk: (sm && typeof sm.lastGenOk === 'boolean') ? sm.lastGenOk : null,
-          errCode: (sm && sm.lastErrCode) ? String(sm.lastErrCode) : '',
-          attempted: (saved.ok ? [`saved:${saved.kind}`] : []),
-          usedRenderer: (saved.ok ? `saved:${saved.kind}` : "-"),
-          ecUsed: "-",
-          errMsg: "",
-          qrSaved: !!saved.ok,
-          qrTs: Number(sm?.ts || 0) || 0
-        };
-        updateMyQrDiagUI(true);
-      })();
-    });
-  }
-
-  // ---------- Mi QR actions (Etapa 2B) ----------
-  let _myQrGenBusy = false;
-
-  function setMyQrGenBusy(on){
-    _myQrGenBusy = !!on;
-    const dis = _myQrGenBusy;
-    try{
-      if (btnGenerateMyQr){
-        if (dis) btnGenerateMyQr.setAttribute("disabled","disabled");
-        else btnGenerateMyQr.removeAttribute("disabled");
-      }
-      if (btnUpdateMyQr){
-        if (dis) btnUpdateMyQr.setAttribute("disabled","disabled");
-        else btnUpdateMyQr.removeAttribute("disabled");
-      }
-    }catch(_e){}
-  }
-
-  function myQrFailUi(code, errCode, hadSaved){
-    const cause = qrCauseLabel(code) || "C) Error interno al renderizar";
-    const msg = `${cause} (${errCode})`;
-    if (!hadSaved){
-      setMyQrPlaceholder(code);
-    }
-    setMyQrStatusMsg(false);
-    setMyQrWarnMsg(msg, true);
-    try{ if (myQrDetails) myQrDetails.open = true; }catch(_e){}
-  }
-
-  function scheduleGenerateMyQr(){
-    if (_myQrGenBusy) return;
-    if (!myQrModal || myQrModal.hidden) return;
-    setMyQrGenBusy(true);
-
-    // Timing robusto iPad: modal abierto → rAF → setTimeout(50) → generar
-    requestAnimationFrame(() => {
-      setTimeout(() => {
-        generateMyQrNow().finally(() => setMyQrGenBusy(false));
-      }, 50);
-    });
-  }
-
-  async function generateMyQrNow(){
-    const t = (myQrText?.value || buildMyQrText() || "").trim();
-    if (myQrText) myQrText.value = t || "";
-
-    setHintError(myQrErr, "");
-    setMyQrWarnMsg("", false);
-
-    const prevSaved = readSavedMyQr();
-    const hadSaved = !!prevSaved.ok;
-
-    const libOk = isQrLibOk();
-    if (!libOk){
-      await saveMyQrMetaForPayload(t, { ok:false, errCode:"QR_LIB_MISSING" });
-      if (hadSaved){
-        scheduleMyQrRender();
-        setTimeout(() => {
-          myQrFailUi("A", "QR_LIB_MISSING", true);
-          if (_myQrLastDiag){ _myQrLastDiag.genOk = false; _myQrLastDiag.errCode = "QR_LIB_MISSING"; _myQrLastDiag.libOk = false; }
-          updateMyQrDiagUI(true);
-        }, 80);
-      }else{
-        myQrFailUi("A", "QR_LIB_MISSING", false);
-        if (_myQrLastDiag){ _myQrLastDiag.genOk = false; _myQrLastDiag.errCode = "QR_LIB_MISSING"; _myQrLastDiag.libOk = false; }
-        updateMyQrDiagUI(true);
-      }
-      return;
-    }
-
-    // Payload vacío: no intentar render. Error claro y UI estable.
-    const payloadEmpty = !t;
-    if (payloadEmpty){
-      await saveMyQrMetaForPayload(t, { ok:false, errCode:"QR_PAYLOAD_EMPTY" });
-      const code = "D";
-      const errCode = "QR_PAYLOAD_EMPTY";
-      if (hadSaved){
-        scheduleMyQrRender();
-        setTimeout(() => {
-          myQrFailUi(code, errCode, true);
-          if (_myQrLastDiag){
-            _myQrLastDiag.genOk = false;
-            _myQrLastDiag.errCode = errCode;
-            _myQrLastDiag.errMsg = "Payload vacío";
-            _myQrLastDiag.usedRenderer = "-";
-          }
-          updateMyQrDiagUI(true);
-        }, 70);
-      }else{
-        myQrFailUi(code, errCode, false);
-        if (_myQrLastDiag){
-          _myQrLastDiag.genOk = false;
-          _myQrLastDiag.errCode = errCode;
-          _myQrLastDiag.errMsg = "Payload vacío";
-          _myQrLastDiag.usedRenderer = "-";
-        }
-        updateMyQrDiagUI(true);
-      }
-      return;
-    }
-
-    // Generar SVG
-    let svgStr = "";
-    try{
-      const pack = pickBestQrDiag(t);
-      const qr = pack.qr;
-      if (_myQrLastDiag){
-        try{
-          _myQrLastDiag.libOk = true;
-          _myQrLastDiag.ecUsed = String(pack.ec || "-");
-          const a = Array.isArray(_myQrLastDiag.attempted) ? _myQrLastDiag.attempted : [];
-          a.push(`gen:make:${String(pack.ec||"-")}`);
-          _myQrLastDiag.attempted = a;
-        }catch(_e){}
-      }
-      const cellSize = 4;
-      const margin = cellSize * 4;
-      svgStr = qr.createSvgTag(cellSize, margin);
-      if (!svgStr || !/<svg[\s>]/i.test(svgStr)) throw new Error("SVG_EMPTY");
-
-      if (_myQrLastDiag){
-        try{
-          const a = Array.isArray(_myQrLastDiag.attempted) ? _myQrLastDiag.attempted : [];
-          a.push("svg");
-          _myQrLastDiag.attempted = a;
-          _myQrLastDiag.usedRenderer = "svg";
-          _myQrLastDiag.errMsg = "";
-        }catch(_e){}
-      }
-
-      // Guardado seguro: no perder QR previo si falla
-      const prevSvg = String(lsGetSafe(SIGILOA33_QR_IDENTITY_SVG_V1) || "");
-      const prevPng = String(lsGetSafe(SIGILOA33_QR_IDENTITY_PNG_V1) || "");
-
-      lsSetSafe(SIGILOA33_QR_IDENTITY_SVG_V1, svgStr);
-      const back = String(lsGetSafe(SIGILOA33_QR_IDENTITY_SVG_V1) || "");
-      if (back.trim() !== svgStr.trim()){
-        // Revertir
-        lsSetSafe(SIGILOA33_QR_IDENTITY_SVG_V1, prevSvg);
-        lsSetSafe(SIGILOA33_QR_IDENTITY_PNG_V1, prevPng);
-        throw new Error("SAVE_FAIL");
-      }
-
-      // Preferir SVG: limpiar PNG legacy
-      lsSetSafe(SIGILOA33_QR_IDENTITY_PNG_V1, "");
-
-    }catch(e){
-      const tooLong = isQrCapacityError(e);
-      const code = tooLong ? "B" : "C";
-      const errCode = tooLong ? "QR_TEXT_TOO_LONG" : "QR_GEN_FAIL_1";
-
-      await saveMyQrMetaForPayload(t, { ok:false, errCode });
-
-      if (hadSaved){
-        scheduleMyQrRender();
-        setTimeout(() => {
-          myQrFailUi(code, errCode, true);
-          if (_myQrLastDiag){
-            try{
-              _myQrLastDiag.genOk = false;
-              _myQrLastDiag.errCode = errCode;
-              _myQrLastDiag.errMsg = String(e?.message || e || "");
-              _myQrLastDiag.usedRenderer = "-";
-              const a = Array.isArray(_myQrLastDiag.attempted) ? _myQrLastDiag.attempted : [];
-              a.push("gen:fail");
-              _myQrLastDiag.attempted = a;
-            }catch(_e){}
-          }
-          updateMyQrDiagUI(true);
-        }, 90);
-      }else{
-        myQrFailUi(code, errCode, false);
-        if (_myQrLastDiag){
-            try{
-              _myQrLastDiag.genOk = false;
-              _myQrLastDiag.errCode = errCode;
-              _myQrLastDiag.errMsg = String(e?.message || e || "");
-              _myQrLastDiag.usedRenderer = "-";
-              const a = Array.isArray(_myQrLastDiag.attempted) ? _myQrLastDiag.attempted : [];
-              a.push("gen:fail");
-              _myQrLastDiag.attempted = a;
-            }catch(_e){}
-          }
-        updateMyQrDiagUI(true);
-      }
-      return;
-    }
-
-    // Meta: solo después de guardado correcto
-    await saveMyQrMetaForPayload(t, { ok:true, errCode:"" });
-    if (_myQrLastDiag){
-      try{ _myQrLastDiag.genOk = true; _myQrLastDiag.errCode = ""; _myQrLastDiag.errMsg = ""; }catch(_e){}
-    }
-    toast("QR guardado");
-    scheduleMyQrRender();
-  }
 
   // ---------- Backup UI actions (Etapa 8) ----------
   function setHintError(el, msg){
@@ -2406,13 +1656,14 @@ Contactos: ${n}`;
 
   const contactModal = $("#contactModal");
   const cmTitle = $("#contactModalTitle");
+  const cmIdentity = $("#contactIdentity");
+  const btnApplyIdentity = $("#btnApplyIdentity");
+  const btnClearIdentity = $("#btnClearIdentity");
+  const cmIdentityErr = $("#contactIdentityErr");
   const cmName = $("#contactName");
   const cmLast = $("#contactLast");
   const cmAlias = $("#contactAlias");
   const cmLock = $("#contactLock");
-  const cmQrText = $("#contactQrText");
-  const cmQrError = $("#contactQrError");
-  const btnScanContactQR = $("#btnScanContactQR");
   const cmDetectedAlias = $("#contactDetectedAlias");
   const cmDetectedHuella = $("#contactDetectedHuella");
   const cmVerified = $("#contactVerified");
@@ -2420,38 +1671,14 @@ Contactos: ${n}`;
   const btnCancelContact = $("#btnCancelContact");
   const btnCloseContactModal = $("#btnCloseContactModal");
 
-  // Modal: Escanear QR (Etapa 6)
-  const scanQrModal = $("#scanQrModal");
-  const scanQrVideo = $("#scanQrVideo");
-  const scanQrError = $("#scanQrError");
-  const btnCloseScanQrModal = $("#btnCloseScanQrModal");
-  const btnScanQrPaste = $("#btnScanQrPaste");
-  const btnScanQrCancel = $("#btnScanQrCancel");
-
   const confirmModal = $("#confirmModal");
   const confirmText = $("#confirmText");
   const btnConfirmCancel = $("#btnConfirmCancel");
   const btnConfirmDelete = $("#btnConfirmDelete");
   const btnCloseConfirmModal = $("#btnCloseConfirmModal");
 
-  let _scanStream = null;
-  let _scanLoopOn = false;
-  let _scanLastTs = 0;
-
   let _pendingDelete = null;
   let _savingContact = false;
-
-  function setScanQrError(msg){
-    if (!scanQrError) return;
-    const m = String(msg || "").trim();
-    if (m){
-      scanQrError.hidden = false;
-      scanQrError.textContent = m;
-    }else{
-      scanQrError.hidden = true;
-      scanQrError.textContent = "";
-    }
-  }
 
   function setDetected(alias, huellaHex){
     const a = normalizeAlias(alias || "");
@@ -2464,128 +1691,6 @@ Contactos: ${n}`;
 
   function clearDetected(){
     setDetected("", "");
-  }
-
-  async function applyQrTextToContactForm(qrText){
-    const t = String(qrText || "").trim();
-    if (!t){
-      setContactQrError("");
-      clearDetected();
-      return;
-    }
-    try{
-      const parsed = await parseSigiloQrPayload(t);
-      setContactQrError("");
-      setDetected(parsed.alias, parsed.huella);
-      if (parsed.candadoPublico && cmLock) cmLock.value = parsed.candadoPublico;
-      if (parsed.alias && cmAlias) cmAlias.value = "@" + normalizeAlias(parsed.alias);
-      if (parsed.nombre && cmName) cmName.value = parsed.nombre;
-      if (parsed.apellidos && cmLast) cmLast.value = parsed.apellidos;
-    }catch(e){
-      setContactQrError(e?.message || "QR inválido");
-      clearDetected();
-    }
-  }
-
-  function scanFallbackToPaste(reason){
-    // Fallback inmediato a pegar texto QR
-    if (reason) toast(reason);
-    closeModal(scanQrModal);
-    stopQrScan();
-    setTimeout(() => cmQrText?.focus(), 50);
-  }
-
-  function stopQrScan(){
-    _scanLoopOn = false;
-    if (_scanStream){
-      try{ _scanStream.getTracks().forEach(t => t.stop()); }catch{}
-      _scanStream = null;
-    }
-    if (scanQrVideo){
-      try{ scanQrVideo.srcObject = null; }catch{}
-    }
-  }
-
-  async function startQrScan(){
-    // Requisitos mínimos
-    if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)){
-      scanFallbackToPaste("No hay cámara en este navegador");
-      return;
-    }
-    if (!window.isSecureContext){
-      scanFallbackToPaste("La cámara requiere HTTPS. Usa https o pega el texto QR.");
-      return;
-    }
-    if (!("BarcodeDetector" in window)){
-      scanFallbackToPaste("Este navegador no soporta escaneo QR. Pega el texto QR.");
-      return;
-    }
-
-    let detector;
-    try{
-      detector = new BarcodeDetector({ formats: ["qr_code"] });
-    }catch{
-      scanFallbackToPaste("Escaneo QR no disponible. Pega el texto QR.");
-      return;
-    }
-
-    setScanQrError("");
-    try{
-      _scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
-    }catch(e){
-      const name = e?.name || "";
-      if (name === "NotAllowedError" || name === "PermissionDeniedError"){
-        scanFallbackToPaste("Permiso de cámara denegado. Pega el texto QR.");
-        return;
-      }
-      if (name === "NotFoundError" || name === "OverconstrainedError"){
-        scanFallbackToPaste("No se encontró cámara. Pega el texto QR.");
-        return;
-      }
-      scanFallbackToPaste("No se pudo abrir la cámara. Pega el texto QR.");
-      return;
-    }
-
-    if (scanQrVideo){
-      scanQrVideo.srcObject = _scanStream;
-      try{ await scanQrVideo.play(); }catch{}
-    }
-
-    _scanLoopOn = true;
-    _scanLastTs = 0;
-
-    const loop = async (ts) => {
-      if (!_scanLoopOn) return;
-      // throttle ~4fps
-      if (ts && _scanLastTs && (ts - _scanLastTs) < 240){
-        requestAnimationFrame(loop);
-        return;
-      }
-      _scanLastTs = ts || (Date.now());
-
-      try{
-        const img = scanQrVideo;
-        if (img && img.readyState >= 2){
-          const codes = await detector.detect(img);
-          if (codes && codes.length){
-            const raw = String(codes[0].rawValue || "").trim();
-            if (raw){
-              stopQrScan();
-              closeModal(scanQrModal);
-              if (cmQrText) cmQrText.value = raw;
-              await applyQrTextToContactForm(raw);
-              toast("QR leído");
-              return;
-            }
-          }
-        }
-      }catch{
-        // si falla, solo sigue; el usuario puede fallback
-      }
-      requestAnimationFrame(loop);
-    };
-
-    requestAnimationFrame(loop);
   }
 
   function randomId(prefix="c"){
@@ -2621,18 +1726,6 @@ Contactos: ${n}`;
       return (obj && typeof obj === "object") ? obj : null;
     }catch{
       return null;
-    }
-  }
-
-  function setContactQrError(msg){
-    if (!cmQrError) return;
-    const m = String(msg || "").trim();
-    if (m){
-      cmQrError.hidden = false;
-      cmQrError.textContent = m;
-    }else{
-      cmQrError.hidden = true;
-      cmQrError.textContent = "";
     }
   }
 
@@ -2767,16 +1860,160 @@ Contactos: ${n}`;
       return;
     }
     if (cmTitle) cmTitle.textContent = "Agregar contacto";
+    if (cmIdentity) cmIdentity.value = "";
+    if (cmIdentityErr){ cmIdentityErr.hidden = true; cmIdentityErr.textContent = ""; }
     if (cmName) cmName.value = "";
     if (cmLast) cmLast.value = "";
     if (cmAlias) cmAlias.value = "";
     if (cmLock) cmLock.value = "";
-    if (cmQrText) cmQrText.value = "";
     if (cmVerified) cmVerified.checked = false;
     clearDetected();
-    setContactQrError("");
     openModal(contactModal);
-    setTimeout(() => cmName?.focus(), 50);
+    setTimeout(() => (cmIdentity || cmName)?.focus(), 50);
+  }
+
+  // Etapa 7I/2 + 7I/3: aceptar identidad por enlace o por código y pre-llenar modal (sin auto-guardar)
+  function validateIdentityLinkPayload(obj){
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) throw new Error("Formato inválido");
+    const t = String(obj.t || "");
+    const okType = (t === "sigilo-a33-identity-link-v1" || t === "sigilo-a33-identity-code-v1");
+    if (!okType || Number(obj.v) !== 1) throw new Error("Formato inválido");
+
+    const p = obj.p;
+    if (!p || typeof p !== "object" || Array.isArray(p)) throw new Error("Formato inválido");
+
+    const nombre = String(p.name || "").trim();
+    const apellidos = String(p.last || "").trim();
+    const alias = normalizeAlias(p.alias || "");
+
+    if (nombre.length > 64 || apellidos.length > 64 || alias.length > 32) throw new Error("Formato inválido");
+
+    const lock = String(obj.lock || "").trim();
+    if (!lock || lock.length > 12000) throw new Error("Formato inválido");
+
+    const lockObj = parseJsonMaybe(lock);
+    const schemaOk = (lockObj && lockObj.t === "sigilo-a33-candado-v1" && lockObj.alg === "RSA-OAEP-256" && lockObj.pub);
+    if (!schemaOk) throw new Error("Formato inválido");
+    const pub = lockObj.pub;
+    if (!pub || typeof pub !== "object" || Array.isArray(pub)) throw new Error("Formato inválido");
+    if (String(pub.kty || "").toUpperCase() !== "RSA") throw new Error("Formato inválido");
+    if (typeof pub.n !== "string" || typeof pub.e !== "string") throw new Error("Formato inválido");
+    if (pub.n.length < 200 || pub.n.length > 6000) throw new Error("Formato inválido");
+    if (pub.e.length < 2 || pub.e.length > 10) throw new Error("Formato inválido");
+
+    return { nombre, apellidos, alias, candadoPublico: lock };
+  }
+
+  function setIdentityImportError(msg){
+    if (!cmIdentityErr) return;
+    const m = String(msg || "").trim();
+    if (m){
+      cmIdentityErr.hidden = false;
+      cmIdentityErr.textContent = m;
+    }else{
+      cmIdentityErr.hidden = true;
+      cmIdentityErr.textContent = "";
+    }
+  }
+
+  function extractIdentityB64FromText(raw){
+    const txt = String(raw || "");
+    const flat = txt.replace(/\s+/g, "").trim();
+
+    // Código de identidad (Etapa 7I/3)
+    let m = flat.match(/^SIGILOA33:IDENTITY:(\d+):([A-Za-z0-9_-]+)$/);
+    if (m){
+      const ver = Number(m[1]);
+      if (ver !== SIGILO_IDENTITY_CODE_VERSION) throw new Error("Versión no compatible");
+      return m[2];
+    }
+
+    // Enlace de identidad legacy: ...#/i/<b64>
+    m = txt.match(/(?:#\/i\/|\/i\/)([A-Za-z0-9_-]+)/);
+    if (m) return m[1];
+
+    return "";
+  }
+
+  async function applyIdentityFromField(){
+    const raw = String(cmIdentity?.value || "");
+    if (!raw.trim()){
+      setIdentityImportError("");
+      return;
+    }
+
+    let b64 = "";
+    try{ b64 = extractIdentityB64FromText(raw); }catch(e){
+      setIdentityImportError(e?.message || "Formato inválido");
+      return;
+    }
+
+    if (!b64){
+      setIdentityImportError("Formato inválido");
+      return;
+    }
+
+    let obj;
+    try{ obj = base64UrlDecodeJson(String(b64 || "").trim()); }
+    catch{ setIdentityImportError("Formato inválido"); return; }
+
+    let pre;
+    try{ pre = validateIdentityLinkPayload(obj); }
+    catch{ setIdentityImportError("Formato inválido"); return; }
+
+    // Pre-llenar (sin auto-guardar)
+    if (cmName) cmName.value = pre.nombre;
+    if (cmLast) cmLast.value = pre.apellidos;
+    if (cmAlias) cmAlias.value = pre.alias;
+    if (cmLock) cmLock.value = pre.candadoPublico;
+    if (cmVerified) cmVerified.checked = false;
+    clearDetected();
+
+    // Best-effort: huella detectada (si existe UI)
+    try{
+      const meta = await computeContactMeta(pre.candadoPublico);
+      setDetected(pre.alias, meta.fpHex);
+    }catch(_e){}
+
+    setIdentityImportError("");
+    toast("Identidad cargada: revisa y guarda");
+  }
+
+  async function consumePendingIdentityImport(){
+    if (_pendingIdentityImportDone) return;
+    const b64 = String(_pendingIdentityImportB64 || "").trim();
+    if (!b64) return;
+    _pendingIdentityImportDone = true;
+    _pendingIdentityImportB64 = "";
+
+    let obj;
+    try{ obj = base64UrlDecodeJson(b64); }catch{ toast("Enlace de identidad inválido"); return; }
+
+    let pre;
+    try{ pre = validateIdentityLinkPayload(obj); }catch{ toast("Enlace de identidad inválido"); return; }
+
+    // Asegurar ruta Contactos y limpiar hash anti-repetición (por si algo quedó raro)
+    try{
+      setActive("contacts");
+      if ((location.hash || "").startsWith("#/i/")) history.replaceState(null, "", "#/contacts");
+    }catch(_e){}
+
+    // Abrir modal y pre-llenar (sin auto-guardar)
+    openAddContact();
+    if (cmName) cmName.value = pre.nombre;
+    if (cmLast) cmLast.value = pre.apellidos;
+    if (cmAlias) cmAlias.value = pre.alias;
+    if (cmLock) cmLock.value = pre.candadoPublico;
+    if (cmVerified) cmVerified.checked = false;
+    clearDetected();
+
+    // Opcional: mostrar huella detectada
+    try{
+      const meta = await computeContactMeta(pre.candadoPublico);
+      setDetected(pre.alias, meta.fpHex);
+    }catch(_e){}
+
+    toast("Identidad cargada: revisa y guarda");
   }
 
   function openConfirmDelete(contact){
@@ -2793,34 +2030,7 @@ Contactos: ${n}`;
     let apellidos = (cmLast?.value || "").trim();
     let alias = normalizeAlias(cmAlias?.value || "");
     let candadoPublico = (cmLock?.value || "").trim();
-    const qrText = (cmQrText?.value || "").trim();
     const verificado = !!(cmVerified && cmVerified.checked);
-
-    if (qrText){
-      try{
-        const parsed = await parseSigiloQrPayload(qrText);
-        candadoPublico = parsed.candadoPublico;
-
-        if (!alias && parsed.alias) alias = normalizeAlias(parsed.alias);
-        if (!nombre && parsed.nombre) nombre = parsed.nombre;
-        if (!apellidos && parsed.apellidos) apellidos = parsed.apellidos;
-
-        // Transparencia: reflejar lo importado
-        if (cmLock) cmLock.value = candadoPublico;
-        if (parsed.alias && cmAlias && !cmAlias.value.trim()) cmAlias.value = "@" + normalizeAlias(parsed.alias);
-        if (parsed.nombre && cmName && !cmName.value.trim()) cmName.value = parsed.nombre;
-        if (parsed.apellidos && cmLast && !cmLast.value.trim()) cmLast.value = parsed.apellidos;
-
-        setContactQrError("");
-      }catch(e){
-        const msg = e?.message || "QR inválido";
-        setContactQrError(msg);
-        toast(msg);
-        return;
-      }
-    }else{
-      setContactQrError("");
-    }
 
     if (!nombre || !apellidos){
       toast("Falta nombre/apellidos");
@@ -2892,37 +2102,16 @@ Contactos: ${n}`;
   function bindContactEvents(){
     btnAddContact?.addEventListener("click", openAddContact);
 
-    // Escanear QR (cámara)
-    btnScanContactQR?.addEventListener("click", async () => {
-      openModal(scanQrModal);
-      await startQrScan();
+    // Pegar identidad (Etapa 7I/3)
+    btnApplyIdentity?.addEventListener("click", () => { applyIdentityFromField(); });
+    btnClearIdentity?.addEventListener("click", () => {
+      if (cmIdentity) cmIdentity.value = "";
+      setIdentityImportError("");
     });
-
-    const closeScan = () => {
-      closeModal(scanQrModal);
-      stopQrScan();
-      setScanQrError("");
-    };
-
-    btnCloseScanQrModal?.addEventListener("click", closeScan);
-    btnScanQrCancel?.addEventListener("click", closeScan);
-    btnScanQrPaste?.addEventListener("click", () => scanFallbackToPaste(""));
-
-    scanQrModal?.addEventListener("click", (ev) => {
-      const t = ev.target;
-      if (t && t.dataset && t.dataset.close) closeScan();
+    cmIdentity?.addEventListener("input", () => setIdentityImportError(""));
+    cmIdentity?.addEventListener("paste", () => {
+      setTimeout(() => { applyIdentityFromField(); }, 20);
     });
-
-    // QR (autorrelleno por texto)
-    let qrTimer = null;
-    cmQrText?.addEventListener("input", () => {
-      clearTimeout(qrTimer);
-      qrTimer = setTimeout(async () => {
-        const t = (cmQrText.value || "").trim();
-        await applyQrTextToContactForm(t);
-      }, 220);
-    });
-
 
     // Search
     elContactSearch?.addEventListener("input", () => renderContacts());
@@ -2943,7 +2132,6 @@ Contactos: ${n}`;
     // Modales: cerrar
     const closeCM = () => {
       closeModal(contactModal);
-      closeScan();
     };
     const closeConf = () => { _pendingDelete = null; closeModal(confirmModal); };
 
@@ -2968,10 +2156,8 @@ Contactos: ${n}`;
     // Escape
     window.addEventListener("keydown", (ev) => {
       if (ev.key !== "Escape") return;
-      if (scanQrModal && !scanQrModal.hidden) closeScan();
       if (contactModal && !contactModal.hidden) closeCM();
       if (confirmModal && !confirmModal.hidden) closeConf();
-      if (myQrModal && !myQrModal.hidden) closeMyQr();
     });
   }
 
@@ -2985,9 +2171,10 @@ Contactos: ${n}`;
       opt.value = "";
       opt.textContent = "Sin contactos aún";
       elEncryptSelect.appendChild(opt);
+      refreshEncryptState();
       return;
-    refreshEncryptState();
-  }
+    }
+
     const opt0 = document.createElement("option");
     opt0.value = "";
     opt0.textContent = "Selecciona un contacto…";
@@ -2998,6 +2185,7 @@ Contactos: ${n}`;
       opt.textContent = formatDisplayName(c);
       elEncryptSelect.appendChild(opt);
     }
+    refreshEncryptState();
   }
 
   // Tabs navigation
@@ -3158,6 +2346,9 @@ Contactos: ${n}`;
       renderEncryptContactSelect();
       refreshEncryptState();
       bindContactEvents();
+
+      // Etapa 7I/2: si venimos de un enlace de identidad, abrir modal pre-llenado.
+      await consumePendingIdentityImport();
     }catch(e){
       const cause = e?.message || String(e);
       showIdentityError(`No se pudo inicializar identidad: ${cause}`);

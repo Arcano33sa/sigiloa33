@@ -13,7 +13,6 @@ const ASSETS = [
   "./styles.css",
   "./app.js",
   "./manifest.json",
-  "./qrcode-generator.js",
   "./assets/sigilo-a33-logo.png",
   "./assets/logo.png",
   "./assets/icon-192.png",

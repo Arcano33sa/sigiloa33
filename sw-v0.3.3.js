@@ -3,7 +3,7 @@
    HARDENING: fallback a index.html SOLO navegación; assets JAMÁS reciben HTML. */
 
 
-const BUILD_ID = "v0.3.3-20260211T1331Z";
+const BUILD_ID = "v0.3.3-20260211T1953Z";
 const CACHE_PREFIX = "sigilo-a33-";
 const CACHE = `${CACHE_PREFIX}${BUILD_ID}`;
 
@@ -13,7 +13,6 @@ const ASSETS = [
   "./styles.css",
   "./app.js",
   "./manifest.json",
-  "./qrcode-generator.js",
   "./assets/sigilo-a33-logo.png",
   "./assets/logo.png",
   "./assets/icon-192.png",

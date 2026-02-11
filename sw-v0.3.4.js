@@ -3,7 +3,7 @@
    HARDENING: fallback a index.html SOLO navegación; assets JAMÁS reciben HTML. */
 
 
-const BUILD_ID = "v0.2.11-20260210T1842Z";
+const BUILD_ID = "v0.3.4-20260211T2013Z";
 const CACHE_PREFIX = "sigilo-a33-";
 const CACHE = `${CACHE_PREFIX}${BUILD_ID}`;
 
