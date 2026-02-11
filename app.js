@@ -2,10 +2,10 @@
   const SCREENS = ["encrypt","decrypt","contacts","profile"];
 
   // Build stamp (Etapa 8E): visible para diagnóstico anti-caché/SW
-  const BUILD_ID = "v0.3.1-20260210T1904Z";
+  const BUILD_ID = "v0.3.3-20260211T1331Z";
 
   // Service Worker versionado por archivo (Etapa 8F)
-  const SW_VERSIONED_FILE = "./sw-v0.3.1.js";
+  const SW_VERSIONED_FILE = "./sw-v0.3.3.js";
   const SW_BRIDGE_FILE = "./sw.js";
 
   // Mi QR — guardado (Etapa 1B)
@@ -1048,10 +1048,45 @@
 
   function buildQrInstance(text, ecLevel){
     const level = (ecLevel || SIGILO_QR_EC_LEVEL_FALLBACK);
-    const qr = qrcode(0, level); // typeNumber auto
-    qr.addData(String(text || "").trim());
-    qr.make();
-    return qr;
+
+    // El payload DEBE ser string (no null/undefined). Si está vacío, no renderizar.
+    if (text === null || typeof text === 'undefined'){
+      const e = new Error('QR_PAYLOAD_EMPTY');
+      try{ e.__sigilo_errCode = 'QR_PAYLOAD_EMPTY'; }catch(_e){}
+      throw e;
+    }
+    const t = String(text).trim();
+    if (!t){
+      const e = new Error('QR_PAYLOAD_EMPTY');
+      try{ e.__sigilo_errCode = 'QR_PAYLOAD_EMPTY'; }catch(_e){}
+      throw e;
+    }
+
+    // qrcode-generator NO soporta typeNumber=0 (auto).
+    // Estrategia determinística: probar 1..40 y elegir el más pequeño que haga make() sin excepción.
+    let lastErr = null;
+    let capErrs = 0;
+    for (let typeNumber = 1; typeNumber <= 40; typeNumber++){
+      try{
+        const qr = qrcode(typeNumber, level);
+        qr.addData(t);
+        qr.make();
+        return qr;
+      }catch(e){
+        lastErr = e;
+        const msg = (e && e.message) ? String(e.message) : String(e || '');
+        if (/overflow|too long|data too long|code length|QR_TEXT_TOO_LONG/i.test(msg)) capErrs++;
+      }
+    }
+
+    // Si falló TODO, diferenciar "demasiado largo" vs error interno.
+    if (capErrs >= 40){
+      const e = new Error('QR_TEXT_TOO_LONG');
+      try{ e.__sigilo_errCode = 'QR_TEXT_TOO_LONG'; }catch(_e){}
+      throw e;
+    }
+
+    throw (lastErr || new Error('QR make failed'));
   }
 
   function isQrLibOk(){
@@ -1060,13 +1095,14 @@
 
   function isQrCapacityError(err){
     const msg = (err && err.message) ? String(err.message) : String(err || "");
-    return /overflow|too long|data too long|code length/i.test(msg);
+    return /overflow|too long|data too long|code length|QR_TEXT_TOO_LONG/i.test(msg);
   }
 
   function qrCauseLabel(code){
     if (code === "A") return "A) Librería QR no cargó (probable caché/SW viejo)";
     if (code === "B") return "B) Texto QR demasiado largo para QR";
     if (code === "C") return "C) Error interno al renderizar";
+    if (code === "D") return "D) Payload vacío";
     return "";
   }
 
@@ -1349,7 +1385,7 @@
       const { qr, ec } = pickBestQrDiag(t);
       const cellSize = 4;
       const margin = cellSize * 4; // quiet zone = 4 modules
-      mountEl.innerHTML = qr.createSvgTag({ cellSize, margin, scalable: true, alt: (altText || "Mi QR") });
+      mountEl.innerHTML = qr.createSvgTag(cellSize, margin);
       return { ok:true, ec, err:null };
     }catch(e){
       mountEl.innerHTML = "";
@@ -1969,15 +2005,65 @@
       return;
     }
 
+    // Payload vacío: no intentar render. Error claro y UI estable.
+    const payloadEmpty = !t;
+    if (payloadEmpty){
+      await saveMyQrMetaForPayload(t, { ok:false, errCode:"QR_PAYLOAD_EMPTY" });
+      const code = "D";
+      const errCode = "QR_PAYLOAD_EMPTY";
+      if (hadSaved){
+        scheduleMyQrRender();
+        setTimeout(() => {
+          myQrFailUi(code, errCode, true);
+          if (_myQrLastDiag){
+            _myQrLastDiag.genOk = false;
+            _myQrLastDiag.errCode = errCode;
+            _myQrLastDiag.errMsg = "Payload vacío";
+            _myQrLastDiag.usedRenderer = "-";
+          }
+          updateMyQrDiagUI(true);
+        }, 70);
+      }else{
+        myQrFailUi(code, errCode, false);
+        if (_myQrLastDiag){
+          _myQrLastDiag.genOk = false;
+          _myQrLastDiag.errCode = errCode;
+          _myQrLastDiag.errMsg = "Payload vacío";
+          _myQrLastDiag.usedRenderer = "-";
+        }
+        updateMyQrDiagUI(true);
+      }
+      return;
+    }
+
     // Generar SVG
     let svgStr = "";
     try{
       const pack = pickBestQrDiag(t);
       const qr = pack.qr;
+      if (_myQrLastDiag){
+        try{
+          _myQrLastDiag.libOk = true;
+          _myQrLastDiag.ecUsed = String(pack.ec || "-");
+          const a = Array.isArray(_myQrLastDiag.attempted) ? _myQrLastDiag.attempted : [];
+          a.push(`gen:make:${String(pack.ec||"-")}`);
+          _myQrLastDiag.attempted = a;
+        }catch(_e){}
+      }
       const cellSize = 4;
       const margin = cellSize * 4;
-      svgStr = qr.createSvgTag({ cellSize, margin, scalable:true, alt:"Mi QR" });
+      svgStr = qr.createSvgTag(cellSize, margin);
       if (!svgStr || !/<svg[\s>]/i.test(svgStr)) throw new Error("SVG_EMPTY");
+
+      if (_myQrLastDiag){
+        try{
+          const a = Array.isArray(_myQrLastDiag.attempted) ? _myQrLastDiag.attempted : [];
+          a.push("svg");
+          _myQrLastDiag.attempted = a;
+          _myQrLastDiag.usedRenderer = "svg";
+          _myQrLastDiag.errMsg = "";
+        }catch(_e){}
+      }
 
       // Guardado seguro: no perder QR previo si falla
       const prevSvg = String(lsGetSafe(SIGILOA33_QR_IDENTITY_SVG_V1) || "");
@@ -2006,12 +2092,32 @@
         scheduleMyQrRender();
         setTimeout(() => {
           myQrFailUi(code, errCode, true);
-          if (_myQrLastDiag){ _myQrLastDiag.genOk = false; _myQrLastDiag.errCode = errCode; _myQrLastDiag.errMsg = String(e?.message || e || ""); }
+          if (_myQrLastDiag){
+            try{
+              _myQrLastDiag.genOk = false;
+              _myQrLastDiag.errCode = errCode;
+              _myQrLastDiag.errMsg = String(e?.message || e || "");
+              _myQrLastDiag.usedRenderer = "-";
+              const a = Array.isArray(_myQrLastDiag.attempted) ? _myQrLastDiag.attempted : [];
+              a.push("gen:fail");
+              _myQrLastDiag.attempted = a;
+            }catch(_e){}
+          }
           updateMyQrDiagUI(true);
         }, 90);
       }else{
         myQrFailUi(code, errCode, false);
-        if (_myQrLastDiag){ _myQrLastDiag.genOk = false; _myQrLastDiag.errCode = errCode; _myQrLastDiag.errMsg = String(e?.message || e || ""); }
+        if (_myQrLastDiag){
+            try{
+              _myQrLastDiag.genOk = false;
+              _myQrLastDiag.errCode = errCode;
+              _myQrLastDiag.errMsg = String(e?.message || e || "");
+              _myQrLastDiag.usedRenderer = "-";
+              const a = Array.isArray(_myQrLastDiag.attempted) ? _myQrLastDiag.attempted : [];
+              a.push("gen:fail");
+              _myQrLastDiag.attempted = a;
+            }catch(_e){}
+          }
         updateMyQrDiagUI(true);
       }
       return;
@@ -2019,6 +2125,9 @@
 
     // Meta: solo después de guardado correcto
     await saveMyQrMetaForPayload(t, { ok:true, errCode:"" });
+    if (_myQrLastDiag){
+      try{ _myQrLastDiag.genOk = true; _myQrLastDiag.errCode = ""; _myQrLastDiag.errMsg = ""; }catch(_e){}
+    }
     toast("QR guardado");
     scheduleMyQrRender();
   }
